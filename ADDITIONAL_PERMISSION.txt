@@ -1,0 +1,25 @@
+MetaFOCUS: Metashape Functions for Optimising, Characterising, and
+Understanding Structure from Motion
+
+MetaFOCUS is free software: you can redistribute it and/or modify it
+under the terms of the GNU General Public License as published by the
+Free Software Foundation, either version 3 of the License, or (at your
+option) any later version. The full text of the GNU General Public
+License, version 3, is in the file LICENSE.
+
+MetaFOCUS runs inside Agisoft Metashape and uses its Python module,
+which is not free software. The licensors of MetaFOCUS therefore grant
+the following additional permission.
+
+
+Additional permission under GNU GPL version 3 section 7
+
+If you modify this Program, or any covered work, by linking or
+combining it with Agisoft Metashape and its Python module Metashape (or
+a modified version of that library), containing parts covered by the
+terms of the End-User License Agreement for Agisoft Metashape, the
+licensors of this Program grant you additional permission to convey
+the resulting work.
+
+
+SPDX-License-Identifier: GPL-3.0-or-later WITH GPL-3.0-linking-exception

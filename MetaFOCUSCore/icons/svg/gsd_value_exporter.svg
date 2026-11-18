@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+
+<style>
+.base{fill:none;stroke:#7C3AED;stroke-width:3;stroke-linecap:round;stroke-linejoin:round}
+.thin{fill:none;stroke:#5B21B6;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.fill{fill:#6D28D9;stroke:none}
+.soft{fill:#EDE9FE;stroke:none}
+.label{font-family:Arial, Helvetica, sans-serif;font-size:8px;font-weight:bold;fill:#6D28D9}
+.small{font-family:Arial, Helvetica, sans-serif;font-size:6px;font-weight:bold;fill:#6D28D9}
+</style>
+
+<rect class="soft" x="11" y="12" width="30" height="30" rx="2"/><path class="base" d="M11 12h30v30H11z"/>
+<path class="thin" d="M21 12v30M31 12v30M11 22h30M11 32h30"/>
+<path class="base" d="M46 20v27"/><path class="thin" d="M42 20h8M42 47h8M46 20l4 5M46 20l-4 5M46 47l4-5M46 47l-4-5"/>
+<path class="thin" d="M35 51h14v-7"/><path class="thin" d="M31 55l18-18"/>
+
+</svg>

@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+
+<style>
+.base{fill:none;stroke:#2563EB;stroke-width:3;stroke-linecap:round;stroke-linejoin:round}
+.thin{fill:none;stroke:#1E40AF;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.fill{fill:#1D4ED8;stroke:none}
+.soft{fill:#DBEAFE;stroke:none}
+.label{font-family:Arial, Helvetica, sans-serif;font-size:8px;font-weight:bold;fill:#1D4ED8}
+.small{font-family:Arial, Helvetica, sans-serif;font-size:6px;font-weight:bold;fill:#1D4ED8}
+</style>
+
+<path class="soft" d="M9 22h10l4-6h10l4 6h10v25H9z"/>
+<path class="base" d="M9 22h10l4-6h10l4 6h10v25H9z"/>
+<circle class="base" cx="28" cy="35" r="8"/>
+<rect class="soft" x="42" y="32" width="13" height="18" rx="1"/>
+<path class="thin" d="M42 32h13v18H42zM42 38h13M42 44h13M48 32v18"/>
+<text class="small" x="43.4" y="29">CSV</text>
+
+</svg>

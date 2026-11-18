@@ -1,0 +1,53 @@
+cff-version: 1.2.0
+message: >-
+  If you use MetaFOCUS in academic work, please cite the MetaFOCUS paper:
+  Verhoeven, G. J., Ressl, C., and Wieser, M. (2026). MetaFOCUS: a Python
+  Toolbox for Optimising, Characterising, and Understanding
+  Structure-from-Motion Pipelines in Agisoft Metashape Professional. 9th
+  ISPRS Low-Cost 3D Workshop, Braunschweig, Germany, 18 to 20 November 2026.
+type: software
+title: "MetaFOCUS: Metashape Functions for Optimising, Characterising, and Understanding Structure from Motion"
+abstract: >-
+  A toolbox of Python scripts for Agisoft Metashape Professional. It provides
+  control-measurement diagnostics, structure-from-motion (SfM) process
+  analysis, filtering and project management, and surface-derived outputs,
+  such as image footprints and the ground sampling distance (GSD).
+authors:
+  - family-names: Verhoeven
+    given-names: Geert J.
+    orcid: "https://orcid.org/0000-0003-4825-9604"
+    affiliation: "Department of Prehistoric and Historical Archaeology, University of Vienna"
+version: 1.0.0
+date-released: 2026-11-18
+license: GPL-3.0-or-later
+repository-code: "https://github.com/BeyondConventionalBoundaries/MetaFOCUS"
+keywords:
+  - Agisoft Metashape Professional
+  - camera calibration
+  - ground sampling distance
+  - photogrammetric diagnostics
+  - Python toolbox
+  - structure from motion
+preferred-citation:
+  type: conference-paper
+  title: "MetaFOCUS: a Python Toolbox for Optimising, Characterising, and Understanding Structure-from-Motion Pipelines in Agisoft Metashape Professional"
+  authors:
+    - family-names: Verhoeven
+      given-names: Geert J.
+      orcid: "https://orcid.org/0000-0003-4825-9604"
+      affiliation: "Department of Prehistoric and Historical Archaeology, University of Vienna"
+    - family-names: Ressl
+      given-names: Camillo
+      orcid: "https://orcid.org/0000-0002-3716-8961"
+      affiliation: "Department of Geodesy and Geoinformation, TU Wien"
+    - family-names: Wieser
+      given-names: Martin
+      orcid: "https://orcid.org/0009-0005-9870-6494"
+      affiliation: "Department of Geodesy and Geoinformation, TU Wien"
+  year: 2026
+  conference:
+    name: "9th ISPRS Low-Cost 3D Workshop"
+    city: Braunschweig
+    country: DE
+    date-start: 2026-11-18
+    date-end: 2026-11-20

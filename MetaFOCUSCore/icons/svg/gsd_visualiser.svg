@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+<style>
+.base{fill:none;stroke:#7C3AED;stroke-width:3;stroke-linecap:round;stroke-linejoin:round}
+.thin{fill:none;stroke:#5B21B6;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.grid{stroke:#5B21B6;stroke-width:1.2}
+.c1{fill:#312E81}.c2{fill:#4F46E5}.c3{fill:#7C3AED}.c4{fill:#A78BFA}.c5{fill:#DDD6FE}.c6{fill:#FDE68A}
+</style>
+<rect x="9" y="11" width="35" height="35" rx="3" fill="#F5F3FF" stroke="#7C3AED" stroke-width="3"/>
+<rect class="c1 grid" x="13" y="15" width="7" height="7"/><rect class="c2 grid" x="20" y="15" width="7" height="7"/><rect class="c3 grid" x="27" y="15" width="7" height="7"/><rect class="c4 grid" x="34" y="15" width="6" height="7"/>
+<rect class="c2 grid" x="13" y="22" width="7" height="7"/><rect class="c3 grid" x="20" y="22" width="7" height="7"/><rect class="c4 grid" x="27" y="22" width="7" height="7"/><rect class="c5 grid" x="34" y="22" width="6" height="7"/>
+<rect class="c3 grid" x="13" y="29" width="7" height="7"/><rect class="c4 grid" x="20" y="29" width="7" height="7"/><rect class="c5 grid" x="27" y="29" width="7" height="7"/><rect class="c6 grid" x="34" y="29" width="6" height="7"/>
+<rect class="c4 grid" x="13" y="36" width="7" height="6"/><rect class="c5 grid" x="20" y="36" width="7" height="6"/><rect class="c6 grid" x="27" y="36" width="7" height="6"/><rect class="c6 grid" x="34" y="36" width="6" height="6"/>
+<rect x="49" y="13" width="6" height="30" rx="2" fill="#312E81"/><rect x="49" y="19" width="6" height="6" fill="#4F46E5"/><rect x="49" y="25" width="6" height="6" fill="#7C3AED"/><rect x="49" y="31" width="6" height="6" fill="#A78BFA"/><rect x="49" y="37" width="6" height="6" fill="#FDE68A"/><rect class="thin" x="49" y="13" width="6" height="30" rx="2"/>
+<path class="base" d="M16 53c5-6 13-6 18 0"/><path class="base" d="M34 53c5-6 13-6 18 0"/><circle cx="34" cy="51" r="3.2" fill="#7C3AED"/>
+</svg>
