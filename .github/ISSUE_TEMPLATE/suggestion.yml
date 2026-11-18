@@ -1,0 +1,40 @@
+name: Suggestion for a tool
+description: Suggest an improvement to the code of a tool of MetaFOCUS.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: "Issues are for faults in the tools of MetaFOCUS and for suggestions to improve their code. They are not for help with Metashape itself or with individual projects."
+  - type: dropdown
+    id: tool
+    attributes:
+      label: Tool
+      description: The tool or the part of MetaFOCUS that the suggestion concerns.
+      options:
+        - SfM Log Parser
+        - Interior Orientation Viewer
+        - Tie Point Covariance Exporter
+        - Image Parameter Exporter
+        - Marker Residual Inspector
+        - Unpinned Marker Projection Remover
+        - Scale Bar A Priori Uncertainty
+        - Gradual Selection Filter
+        - Image Subset Selector
+        - Image Filter
+        - Region Tools
+        - Image Footprint Generator
+        - GSD Value Exporter
+        - GSD Visualiser
+        - Depth & Render Export
+        - Manual and Terminology
+        - Changelog and About MetaFOCUS
+        - Installation and menu
+    validations:
+      required: true
+  - type: textarea
+    id: suggestion
+    attributes:
+      label: Suggestion
+      description: What the tool should do, and why.
+    validations:
+      required: true
