@@ -28,6 +28,7 @@ body:
         - Depth & Render Export
         - Manual and Terminology
         - Changelog and About MetaFOCUS
+        - Check for Updates
         - Installation and menu
     validations:
       required: true
