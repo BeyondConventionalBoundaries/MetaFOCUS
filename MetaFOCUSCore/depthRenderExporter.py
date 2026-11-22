@@ -38,10 +38,10 @@ Author:     Geert J. Verhoeven (ORCID: 0000-0003-4825-9604)
             The depth-map export is based on an earlier script by
             the author.
 Contact:    geert.verhoeven@univie.ac.at
-Version:    1.0.0 (2026-11-18)
+Version:    1.0.1 (2026-11-22)
 Licence:    GPL-3.0-or-later WITH GPL-3.0-linking-exception
 Requires:   Agisoft Metashape Professional 2.x
-Developed for: Agisoft Metashape Professional 2.3.2 (tested offline, see README.md)
+Developed for: Agisoft Metashape Professional 2.3.2
 """
 
 import collections
@@ -138,8 +138,8 @@ def NumpyMissingTexts(platform, interpreterPath):
     """(explanation, [(shell, command)]) of the note and the message when
     NumPy is missing (NumpyInstallCommands), the list empty when the
     interpreter is not known."""
-    explanation = ("Normalised greyscale needs NumPy, which the Python of Metashape does not include. The 32-bit "
-                   "float export needs no NumPy.")
+    explanation = ("Normalised greyscale needs NumPy. Metashape runs scripts with its own Python installation, "
+                   "which does not include NumPy. The 32-bit float export needs no NumPy.")
     commands = NumpyInstallCommands(platform, interpreterPath)
     if not commands:
         return (explanation + " To install NumPy, follow the article \u201c{}\u201d of the Agisoft knowledge base "
@@ -2197,7 +2197,7 @@ class MeshRenderTab(QtWidgets.QWidget):
 
 _ABOUT_HTML = """
 <h2>Depth &amp; Render Export</h2>
-<p><b>Version:</b> 1.0.0 (2026-11-18)<br>
+<p><b>Version:</b> 1.0.1 (2026-11-22)<br>
 <b>Author:</b> Geert J. Verhoeven
 (ORCID: <a href="https://orcid.org/0000-0003-4825-9604">
 0000-0003-4825-9604</a>)<br>
@@ -2399,11 +2399,11 @@ internal chunk units. This export does not need NumPy.</li>
 <li><b>16-bit or 8-bit greyscale, normalised</b>: each depth map is
 stretched to its own range from the minimum to the maximum depth,
 optionally inverted so that nearer is brighter. These exports need
-NumPy, which the Python of Metashape does not include. Without it, the
-tab follows the article &ldquo;How to install external Python module to
-Metashape Professional package&rdquo; of the Agisoft knowledge base.
-When it finds the Python of this Metashape installation, it gives the
-command that installs NumPy into it.
+NumPy. Metashape runs scripts with its own Python installation, which
+does not include NumPy. Without it, the tab follows the article
+&ldquo;How to install external Python module to Metashape Professional
+package&rdquo; of the Agisoft knowledge base. When it finds that Python
+installation, it gives the command that installs NumPy into it.
 Otherwise it names the article. On Windows it gives one line for the
 Command Prompt and one for Windows PowerShell, which needs the call
 operator &amp; before the quoted path. In both lines the path has

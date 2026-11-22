@@ -13,7 +13,7 @@ Date:        2026-06-12
 Licence:     GPL-3.0-or-later WITH GPL-3.0-linking-exception
 Contact:     geert.verhoeven@univie.ac.at
 Requires:    Agisoft Metashape Professional 2.x+
-Developed for: Agisoft Metashape Professional 2.3.2 (tested offline, see README.md)
+Developed for: Agisoft Metashape Professional 2.3.2
 
 Dependencies:
     - photogrammetryUtilities.py (shared module of the MetaFOCUSCore

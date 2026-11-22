@@ -11,12 +11,12 @@ model, of scale bars and reference distances, and of measurement
 uncertainty, and it maps the names of Metashape to these terms.
 
 Author:      Geert J. Verhoeven (ORCID: 0000-0003-4825-9604)
-Version:     1.0.0 (2026-11-18)
+Version:     1.0.1 (2026-11-22)
 Date:        2026-10-05
 Licence:     GPL-3.0-or-later WITH GPL-3.0-linking-exception
 Contact:     geert.verhoeven@univie.ac.at
 Requires:    Agisoft Metashape Professional 2.x+
-Developed for: Agisoft Metashape Professional 2.3.2 (tested offline, see README.md)
+Developed for: Agisoft Metashape Professional 2.3.2
 
 Usage:
     MetaFOCUS > Manual and Terminology (aboutPages.py) shows the page
@@ -30,7 +30,7 @@ import re
 
 _TERMINOLOGY_HTML = """
 <h2>MetaFOCUS Terminology</h2>
-<p>Version 1.0.0 (2026-11-18)</p>
+<p>Version 1.0.1 (2026-11-22)</p>
 <p><b>Author:</b> Geert J. Verhoeven (ORCID: <a href="https://orcid.org/0000-0003-4825-9604">0000-0003-4825-9604</a>)<br>
 <b>Contact:</b> <a href="mailto:geert.verhoeven@univie.ac.at">geert.verhoeven@univie.ac.at</a><br>
 <b>Licence:</b> GNU General Public License, version 3 or any later version (GPL-3.0-or-later),
@@ -516,7 +516,8 @@ orientation of a coordinate system&rdquo; (3.1.15), and a CRS is a
 of its origin nor its scale nor the orientation of its axes, and
 coordinates locate a point only together with their CRS. For a geodetic
 or vertical datum, which ISO 19111:2019 also calls a reference frame,
-the object is the Earth (3.1.9, Notes 1 and 2). An engineering datum
+the object is the Earth, or in planetary applications another celestial
+body (3.1.9, Notes 1 and 2). An engineering datum
 relates a coordinate system to a local reference (3.1.26), for example a
 construction site, a moving object, or an image (3.1.25, Examples 1 to
 3). A coordinate operation changes coordinates in one CRS into

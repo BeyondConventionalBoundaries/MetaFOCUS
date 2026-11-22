@@ -33,10 +33,10 @@ Metashape project.
 
 Author:     Geert J. Verhoeven (ORCID: 0000-0003-4825-9604)
 Contact:    geert.verhoeven@univie.ac.at
-Version:    1.0.0 (2026-11-18)
+Version:    1.0.1 (2026-11-22)
 Licence:    GPL-3.0-or-later WITH GPL-3.0-linking-exception
 Requires:   Agisoft Metashape Professional 2.x
-Developed for: Agisoft Metashape Professional 2.3.2 (tested offline, see README.md)
+Developed for: Agisoft Metashape Professional 2.3.2
 
 Usage
 -----
@@ -509,10 +509,10 @@ def ReferenceEnabled(marker: Any) -> bool:
 def MarkerRole(marker: Any) -> str:
     """Role of a marker: control (reference location, reference ticked),
     check (reference location, reference unticked), tie-only (no
-    reference location), or inspection, an
-    inspection marker of the GSD Value Exporter, whose model-derived
-    reference coordinates make it neither a control nor a check point
-    (IsInspectionMarker), and which the tables leave out."""
+    reference location), or inspection, an inspection marker that the GSD
+    Value Exporter recorded as its own in its metadata, whose
+    model-derived reference coordinates make it neither a control nor a
+    check point (IsInspectionMarker), and which the tables leave out."""
     if IsInspectionMarker(marker):
         return "inspection"
     location = ReferenceLocation(marker)
@@ -1271,7 +1271,7 @@ class ResidualDataBuilder:
 
 _ABOUT_HTML = """
 <h2>Marker Residual Inspector</h2>
-<p><b>Version:</b> 1.0.0 (2026-11-18)<br>
+<p><b>Version:</b> 1.0.1 (2026-11-22)<br>
 <b>Author:</b> Geert J. Verhoeven
 (ORCID: <a href="https://orcid.org/0000-0003-4825-9604">
 0000-0003-4825-9604</a>)<br>
@@ -1331,9 +1331,10 @@ priori standard deviations, as a group of their own.</li>
 <ul>
 <li><b>Role:</b> control (reference coordinates, reference ticked),
 check (reference coordinates, reference unticked), or tie-only (no
-reference coordinates).  The inspection markers of the GSD Value
-Exporter, whose reference coordinates come from the surface model, are
-left out of the tables.</li>
+reference coordinates).  The inspection markers that the GSD Value
+Exporter recorded as its own in their metadata, whose reference
+coordinates come from the surface model, are left out of the
+tables.</li>
 <li><b>Object-space error (m):</b> 3D distance between the estimated marker position and its
 reference coordinates, evaluated in a local east-north-up coordinate reference system (CRS) at the
 reference point. The distance is therefore in metres in a projected and in a geographic CRS alike.
@@ -1433,7 +1434,7 @@ the visible rows of all four tabs to MarkerResidualInspectorMarkers.csv,
 MarkerResidualInspectorProjections.csv, MarkerResidualInspectorImages.csv, and
 MarkerResidualInspectorDiagnostics.csv in a chosen folder. Each file starts with comment lines (#)
 that record the chunk, the residual threshold, and the filters. The role filter line states where
-the filter does not apply. The option <i>Delimiter and decimal separator</i> chooses a comma with a
+the filter does not apply. The option ‘Delimiter and decimal separator’ chooses a comma with a
 decimal point (1.25), a semicolon with a decimal comma (1,25), or a tab with a decimal point. The
 semicolon with the decimal comma suits Excel with regional settings that use the decimal comma, for
 example German or French. Numbers are written with six decimals, lengths with at least four

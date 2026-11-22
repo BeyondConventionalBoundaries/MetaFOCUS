@@ -23,7 +23,7 @@ The volume, pages, and DOI of the paper will be added to this reference. On GitH
 ### Download
 
 1. Open the page of the latest release, https://github.com/BeyondConventionalBoundaries/MetaFOCUS/releases/latest. On the GitHub page of MetaFOCUS, **Releases** in the right-hand column leads there as well.
-2. Under **Assets**, click the MetaFOCUS ZIP file, for example `MetaFOCUS_1-0-0.zip`, to download it. The two **Source code** files are not needed.
+2. Under **Assets**, click the MetaFOCUS ZIP file, for example `MetaFOCUS_1-1-0.zip`, to download it. The two **Source code** files are not needed.
 3. Extract the ZIP file into any folder, for example Downloads. On Windows, right-click the file, choose **Extract All…**, and click **Extract**. On macOS, double-click the file. This gives a folder `MetaFOCUS` with `MetaFOCUS.py` and the folder `MetaFOCUSCore`.
 
 ### Option A: Automatic (recommended)
@@ -52,6 +52,10 @@ The volume, pages, and DOI of the paper will be added to this reference. On GitH
 4. Click **‘Load this session only’** when prompted.
 5. The MetaFOCUS menu is available until you close Metashape.
 
+### Updates
+
+**MetaFOCUS > Check for Updates** shows the changes of a new release and installs it after a click on **Install**. When allowed, MetaFOCUS also checks for updates when it starts (at most once a day). After Install, Metashape must be restarted.
+
 ## Tools
 
 The MetaFOCUS menu has four groups of tools. The tables below describe the 15 tools, group by group and in menu order. A click on a name in this index jumps to its description:
@@ -66,7 +70,7 @@ The MetaFOCUS menu has four groups of tools. The tables below describe the 15 to
 | Module | Description |
 |--------|-------------|
 | **SfM Log Parser** | <a name="tool-sfm-log-parser"></a>Parses the logs of Metashape structure-from-motion (SfM) runs (Align Photos, as TXT, LOG, or HTML) or clipboard content. Renders a structured summary of one SfM run with a text flowchart, and compares the log with the open chunk. Five graphs show the log: the image pairs that it reports, the growth of the 3D tie points, the keypoints per image, the pipeline funnel, and all its runs side by side. A sixth shows which images of the open chunk share valid 3D tie points. |
-| **Interior Orientation Viewer** | <a name="tool-interior-orientation-viewer"></a>Shows the interior orientation parameter estimates of each interior orientation group with their standard errors, estimate/SE with its two-sided p-value, the estimated degrees of freedom, and the correlation matrix. It plots distortion vector fields, residual fields, and profile curves, by default as Metashape’s Distortion Plot defines them, and the coverage of the 2D tie points. **Export CSV** writes the numbers, and **Export HTML** writes an interactive report of the group as a single HTML file. |
+| **Interior Orientation Viewer** | <a name="tool-interior-orientation-viewer"></a>Shows the interior orientation parameter estimates of each interior orientation group with their standard errors, estimate/SE with its two-sided p-value, the estimated degrees of freedom, and the correlation matrix. It plots distortion vector fields, residual fields, and profile curves, by default as Metashape’s Distortion Plot defines them, and the coverage of the 2D tie points. **Export CSV** writes the numbers, and **Export HTML** writes an interactive report of the group, or of every group that has one, each as a single HTML file. |
 | **Tie Point Covariance Exporter** | <a name="tool-tie-point-covariance-exporter"></a>Exports the formal 3D position uncertainty of each 3D tie point: per-axis standard deviations, the full covariance matrix, and the error-ellipsoid decomposition. The uncertainty is given in the world coordinates of the chunk or in local east-north-up coordinates. Tie-point covariances exist only after Optimize Cameras has been run with ‘Estimate tie point covariance’ ticked. Every 3D tie point that is not exported is written with the reason to a companion file. |
 | **Image Parameter Exporter** | <a name="tool-image-parameter-exporter"></a>Exports per-image metadata to CSV: Exif metadata, orientation, pixel column and row counts, principal distance, 2D tie-point and matched keypoint counts, and reprojection errors. It also exports GSD statistics, image scale numbers, and Reference panel data. Metashape can hold the reference coordinates of the images in a coordinate reference system (CRS) other than that of the chunk, and the export keeps that CRS. |
 
@@ -85,7 +89,7 @@ The MetaFOCUS menu has four groups of tools. The tables below describe the 15 to
 | **Gradual Selection Filter** | <a name="tool-gradual-selection-filter"></a>Makes Metashape’s Clean Tie Points (Gradual Selection before Metashape 2.3) iterative, with Optimize Cameras after each iteration, and adds what is needed to judge the result. It uses one or more of these four criteria: Reconstruction Uncertainty, Projection Accuracy, Reprojection Error, and Image Count. Its first step, iteration 0, removes no tie points but re-runs Optimize Cameras with the settings chosen in the tool, so that all iterations are adjusted the same way. Quality metrics are recorded after each iteration, among them the check-point and control-point RMSE and sigma nought. It then suggests an iteration using a one-sided Wilcoxon signed-rank test when check points or control points decide, and otherwise using the RMS reprojection error. |
 | **Image Subset Selector** | <a name="tool-image-subset-selector"></a>Enables or disables images at regular intervals to thin dense image sets, select image subsets for validation experiments, or re-enable all images. |
 | **Image Filter** | <a name="tool-image-filter"></a>Filters the Photos pane to show only enabled or disabled images, and selects them for the 3D view. When no image matches, it says so and leaves the Photos pane and the selection as they are. |
-| **Region Tools** | <a name="tool-region-tools"></a>Aligns the chunk’s coordinate axes with the region by replacing the chunk transform (the reverse of Metashape’s built-in Rotate Region to Local Frame), and copies the region to other chunks, accounting for their transforms and coordinate reference systems (CRSs). The chunk keeps its CRS setting, but every point gets new world coordinates, measured from the new origin along the new axes. |
+| **Region Tools** | <a name="tool-region-tools"></a>Aligns the chunk’s coordinate axes with the region by replacing the chunk transform (the reverse of Metashape’s built-in Rotate Region to Local Frame), and copies the region to other chunks, accounting for their transforms and coordinate reference systems (CRSs). The chunk keeps its CRS setting, but world coordinates are then measured from the new origin along the new axes. |
 
 ### Surface-Derived Project Outputs
 
@@ -104,7 +108,7 @@ The shared module `photogrammetryUtilities.py` holds the computations that sever
 
 ## Manual and Terminology
 
-Below the groups of tools, **Manual and Terminology** shows all About sections (of the toolbox itself and of the 15 individual tools, in the order they appear in the menu) and the terminology in one window. It takes them from the code of the installed version. In the running text of an About section, the first appearance of a term links to its entry in the terminology, and the **Back** button returns the reader to the place before the terminology click. Its **Save as PDF** button saves everything as one PDF file, with each About section and the terminology starting on a new page, and **Save Terminology as PDF** saves only the terminology. The PDF files keep the web links but not the links within the manual, which PDF readers cannot follow. The contents list in the manual’s PDF file shows the page for each section instead.
+Below the groups of tools, **Manual and Terminology** shows all About sections (of the toolbox itself and of the 15 individual tools, in the order they appear in the menu) and the terminology in one window. It takes them from the code of the version in use. In the running text of an About section, the first appearance of a term links to its entry in the terminology, and the **Back** button returns the reader to the place before the terminology click. Its **Save as PDF** button saves everything as one PDF file, with each About section and the terminology starting on a new page, and **Save Terminology as PDF** saves only the terminology. The PDF files keep the web links but not the links within the manual, which PDF readers cannot follow. The contents list in the manual’s PDF file shows the page for each section instead.
 
 The About sections give the method, the sources, and the limits of each tool, for example how the GSD is computed on a plane, a triangular mesh, or a raster DEM. The terminology defines the terms of the tools, their About sections, and the MetaFOCUS paper, each in one sense only, with the literature that they follow. For example, it keeps the pixels of the digital image apart from the photosites of the sensor. A concordance table maps the (often incorrect or vague) terms used by Metashape to those used by MetaFOCUS.
 

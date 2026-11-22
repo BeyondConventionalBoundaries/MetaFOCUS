@@ -49,9 +49,10 @@ indicators and plots of the distortion model and the residuals:
     all directions or in the wedge of a direction chosen in the Coverage
     map, with r including the decentring distortion
   - The layout of the plots in a row of fixed height
-  - Export HTML: the tab shown as one interactive HTML page
-    (interiorOrientationReport), whose plots a web browser changes as the
-    viewer does and prints, for example to a PDF file
+  - Export HTML: the tab shown, or every interior orientation group, each
+    as one interactive HTML page (interiorOrientationReport), whose plots
+    a web browser changes as the viewer does and prints, for example to a
+    PDF file
 
 The estimate/SE and the p-value of a parameter with |estimate/SE| < 3
 are shown in bold: its estimate is not distinguishable from zero at that
@@ -65,12 +66,12 @@ are in a side panel to the right, which "Show notes and statistics"
 opens and closes for all tabs.
 
 Author:      Geert J. Verhoeven (ORCID: 0000-0003-4825-9604)
-Version:     1.0.0 (2026-11-18)
+Version:     1.1.0 (2026-11-22)
 Date:        2026-06-12
 Licence:     GPL-3.0-or-later WITH GPL-3.0-linking-exception
 Contact:     geert.verhoeven@univie.ac.at
 Requires:    Agisoft Metashape Professional 2.x+
-Developed for: Agisoft Metashape Professional 2.3.2 (tested offline, see README.md)
+Developed for: Agisoft Metashape Professional 2.3.2
 
 Usage:
     Loaded automatically by the MetaFOCUS loader.
@@ -80,13 +81,14 @@ Usage:
 
 from .photogrammetryUtilities import (
     ReportSuppressedError,
-    FormatCountWithNoun, DescribeException,
+    FormatCountWithNoun, DescribeException, JoinWithAnd,
     ComputeRedundancyBreakdown, CountProjectionsPerTrack, GetSensorCalibration, ImagesWithTiePointsKeys,
     IsOrientedEnabledCamera, IsKeyframe, NonFiniteResidualsText,
     DisabledOrientedImagesWithObservations, DisabledOrientedImagesText,
     TiePointResidual, SharedGroupLabels, GroupLabelWithKey,
     CSV_FORMAT_ROW_LABEL_TEXT, ChosenCsvFormat, CsvFormatName, DataRowWithDecimalSeparator, FillCsvFormatComboBox,
     ConsoleBlockEnd, ConsoleBlockStartOfChunk, PrintConsoleLines,
+    DeclinedReplacingText, ReplaceUnconfirmedFileQuestionText, ReplacesUnconfirmedFile,
 )
 import Metashape
 import array
@@ -105,7 +107,7 @@ from xml.etree import ElementTree
 
 from PySide2 import QtWidgets, QtCore, QtGui
 import functools
-from .interiorOrientationReport import ReportData, ReportFileName, WriteReport
+from .interiorOrientationReport import RemoveTemporaryReport, ReportData, ReportFileName, WriteReport
 
 # ---------- formatting helpers ----------
 def FormatFixedDecimals(value, decimals=3):
@@ -416,11 +418,10 @@ def CountOrientedImages(chunk):
 # more.
 DISABLED_IMAGE_DEGREES_OF_FREEDOM_TEXT = (
     "Optimize Cameras still adjusts such an image, but the estimated DoF count the observations and unknowns of the "
-    "enabled images only. Enabling the image, or resetting its orientation, makes them match the adjustment.")
+    "enabled images only. Enabling the image, or resetting its orientation, removes this difference.")
 DISABLED_IMAGES_DEGREES_OF_FREEDOM_TEXT = (
     "Optimize Cameras still adjusts such images, but the estimated DoF count the observations and unknowns of the "
-    "enabled images only. Enabling these images, or resetting their orientation, makes the estimated DoF match the "
-    "adjustment.")
+    "enabled images only. Enabling these images, or resetting their orientation, removes this difference.")
 
 
 def ComputeChunkRedundancyBreakdowns(chunk):
@@ -5709,18 +5710,29 @@ def WriteInteriorOrientationCsv(path, content, csvDelimiter=",", decimalSeparato
     """Write the content of InteriorOrientationCsvContent to *path* in
     UTF-8 with *csvDelimiter*: comment lines start with # and keep their
     text, the numbers of the data rows get *decimalSeparator*, and the
-    header rows and the text cells keep their text."""
-    with open(path, "w", newline="", encoding="utf-8") as fileHandle:
-        csvWriter = csv.writer(fileHandle, delimiter=csvDelimiter)
-        for item in content:
-            if item[0] == "comment":
-                fileHandle.write("# {}\r\n".format(item[1]))
-            elif item[0] == "blank":
-                csvWriter.writerow([])
-            elif item[0] == "header":
-                csvWriter.writerow(item[1])
-            else:
-                csvWriter.writerow(DataRowWithDecimalSeparator(item[1], decimalSeparator, item[2]))
+    header rows and the text cells keep their text.  The file is written to
+    a new temporary file next to *path*, which then replaces *path*
+    (os.replace), as the report of Export HTML is (WriteReport), so that a
+    failure leaves an earlier file at *path* as it was.  The temporary file
+    of a failed write is removed (RemoveTemporaryReport)."""
+    fileDescriptor, temporaryPath = tempfile.mkstemp(
+        dir=os.path.dirname(os.path.abspath(path)), prefix=os.path.basename(path) + ".", suffix=".tmp")
+    try:
+        with os.fdopen(fileDescriptor, "w", newline="", encoding="utf-8") as fileHandle:
+            csvWriter = csv.writer(fileHandle, delimiter=csvDelimiter)
+            for item in content:
+                if item[0] == "comment":
+                    fileHandle.write("# {}\r\n".format(item[1]))
+                elif item[0] == "blank":
+                    csvWriter.writerow([])
+                elif item[0] == "header":
+                    csvWriter.writerow(item[1])
+                else:
+                    csvWriter.writerow(DataRowWithDecimalSeparator(item[1], decimalSeparator, item[2]))
+        os.replace(temporaryPath, path)
+    except BaseException:
+        RemoveTemporaryReport(temporaryPath)
+        raise
 
 
 def CsvFileNamePart(text):
@@ -5929,9 +5941,109 @@ def BuildDirectionRow(plotState, sliderRowWidget):
 
 # Tooltip of Export HTML.
 EXPORT_REPORT_TOOLTIP = (
-    "Write a report of the interior orientation group of the tab shown as one HTML file: the parameters,\n"
-    "the camera model, the vector fields, and the distortion profiles, with the controls of the viewer.\n"
-    "A web browser shows it without an internet connection and prints it, for example to a PDF file.")
+    "Write a report of the interior orientation group of the tab shown, or of every group, as one HTML file\n"
+    "per group: the parameters, the camera model, the vector fields, and the distortion profiles, with the\n"
+    "controls of the viewer. A web browser shows it without an internet connection and prints it, for example\n"
+    "to a PDF file.")
+
+# The two choices of Export HTML with more than one interior orientation
+# group (the question of ReportScopeQuestionText).
+REPORT_SCOPE_TAB_SHOWN = "tab shown"
+REPORT_SCOPE_EVERY_GROUP = "every group"
+
+# Why Export HTML of every group did not write a report, with the place of
+# the file: a file of that name appeared in the folder during the export.
+APPEARED_REPORT_REASON_TEXT = "{} appeared in the folder during the export and was kept"
+
+
+def ReportScopeQuestionText(reportTabCount, tabCount, chunkGroupCount, tabShownHasReport=True):
+    """The question of Export HTML in Geert's words (20 November 2026): the
+    report of the active tab, or those of all tabs.  Of the *tabCount* tabs,
+    *reportTabCount* have a report, and the chunk has *chunkGroupCount*
+    interior orientation groups, also those without an enabled, oriented
+    image, which get no tab.  When a tab has no report, all tabs means all
+    tabs that have one, and when the active tab has none
+    (*tabShownHasReport*), only these are offered."""
+    if reportTabCount == chunkGroupCount:
+        groupsText = "the {:,} interior orientation groups in this chunk".format(reportTabCount)
+    else:
+        groupsText = "{:,} of the {:,} interior orientation groups in this chunk".format(reportTabCount,
+                                                                                        chunkGroupCount)
+    tabsText = "all tabs" if reportTabCount == tabCount else "all tabs that have one"
+    if not tabShownHasReport:
+        return ("The active tab has no interior orientation report. Export HTML writes the interior orientation "
+                "report of {} (i.e. {}) in a folder that is chosen next.".format(tabsText, groupsText))
+    return ("Export HTML writes the interior orientation report of either the active tab or of {} (i.e. {}) in a "
+            "folder that is chosen next.".format(tabsText, groupsText))
+
+
+def NoReportOfTabShownText(tabText, actionName):
+    """The message of Export HTML or Export CSV (*actionName*) when the
+    interior orientation group of the tab shown, *tabText*, has no
+    calibration that the viewer can plot, so that its tab holds only a
+    message (BuildWidgetForSensor)."""
+    return ("The interior orientation group of the tab shown, {}, has no calibration that the viewer can plot, so "
+            "{} has nothing to write for it.".format(tabText, actionName))
+
+
+def ReportTabs(tabs):
+    """(tab text, tab widget) of every tab of *tabs* (a QTabWidget) that
+    has a report (its _reportData, see BuildWidgetForSensor), in the order
+    of the tabs."""
+    reportTabs = []
+    for tabIndex in range(tabs.count()):
+        tabWidget = tabs.widget(tabIndex)
+        if getattr(tabWidget, "_reportData", None) is not None:
+            reportTabs.append((tabs.tabText(tabIndex), tabWidget))
+    return reportTabs
+
+
+def GroupReportPaths(folder, reportFileNames):
+    """The paths in *folder* of the reports of the interior orientation
+    groups whose file names are *reportFileNames* (ReportFileName): each
+    its own name, with _2, _3, and so on before the extension when an
+    earlier report of the same export has that name already, in any case,
+    as for two groups whose names differ only in characters that a file
+    name cannot hold."""
+    usedNames = set()
+    paths = []
+    for fileName in reportFileNames:
+        nameStem, extension = os.path.splitext(fileName)
+        candidateName, number = fileName, 1
+        while candidateName.lower() in usedNames:
+            number += 1
+            candidateName = "{}_{}{}".format(nameStem, number, extension)
+        usedNames.add(candidateName.lower())
+        paths.append(os.path.join(folder, candidateName))
+    return paths
+
+
+def ReplaceReportsQuestionText(existingPaths):
+    """The question before Export HTML of every group replaces the files
+    *existingPaths*."""
+    if len(existingPaths) == 1:
+        return "The folder already holds {}.\n\nReplace it?".format(os.path.basename(existingPaths[0]))
+    return "The folder already holds {:,} of these reports, among them {}.\n\nReplace them?".format(
+        len(existingPaths), os.path.basename(existingPaths[0]))
+
+
+def EveryGroupReportMessage(groupCount, writtenCount, failures, folder, wasCancelled):
+    """The message after Export HTML of every group: how many of the
+    *groupCount* reports were written to *folder*, whether the export was
+    cancelled, and the groups whose report failed (*failures*, a list of
+    (tab text, error))."""
+    if wasCancelled:
+        text = "Export HTML was cancelled after {:,} of {:,} reports.".format(writtenCount, groupCount)
+    elif writtenCount == groupCount:
+        text = "Export HTML wrote {:,} reports, one per interior orientation group.".format(groupCount)
+    else:
+        text = "Export HTML wrote {:,} of {:,} reports.".format(writtenCount, groupCount)
+    if writtenCount:
+        text += "\n\nFolder: {}".format(folder)
+    if failures:
+        text += "\n\nNot written: {}.".format(JoinWithAnd(
+            ["{} ({})".format(tabText, errorText) for tabText, errorText in failures]))
+    return text
 
 
 def UpdateTotalMagnificationLabel(plotState):
@@ -6632,7 +6744,7 @@ def BuildDistortionPlotsForSensor(sensor, chunk,
 
 _ABOUT_HTML = """
 <h2>Interior Orientation Viewer</h2>
-<p><b>Version:</b> 1.0.0 (2026-11-18)<br>
+<p><b>Version:</b> 1.1.0 (2026-11-22)<br>
 <b>Author:</b> Geert J. Verhoeven
 (ORCID: <a href="https://orcid.org/0000-0003-4825-9604">
 0000-0003-4825-9604</a>)<br>
@@ -6794,7 +6906,7 @@ observations also its marker measurements. The counts take the enabled images. I
 Metashape 2.3.2, <i>Optimize Cameras</i> also adjusted a disabled image that was still oriented and
 had 2D tie points or marker projections. The notes panel, Export CSV, and Export HTML name
 such images, because the counts leave out their observations and unknowns. Enabling such an image,
-or resetting its orientation, makes the estimated DoF match the adjustment. An unknown that no
+or resetting its orientation, removes this difference. An unknown that no
 observation involves adds one to the
 unknowns and one to the rank defect, so it leaves the redundancy unchanged and is left out. An image
 keeps its orientation when its tie points are removed, until the next <i>Optimize Cameras</i>. A
@@ -7108,7 +7220,7 @@ estimated DoF values, and the table of the vector fields with six significant di
 the profiles and the table of the coverage by radius follow, also with six significant digits, and
 comment lines define their columns. The table of the coverage by radius gives the rings of the
 direction shown, which a comment line names. The export collects the residuals when they are not yet
-collected. The option <i>Delimiter and decimal separator</i> beside the button chooses a comma with
+collected. The option ‘Delimiter and decimal separator’ beside the button chooses a comma with
 a decimal point, a semicolon with a decimal comma, or a tab with a decimal point. For a group
 without a calibration covariance, a comment line says that the file has no parameter table, no
 correlations, and no estimated DoF values.</p>
@@ -7132,6 +7244,13 @@ for every direction as the viewer does. The page also holds the medians of every
 directions and in each of the 360 directions, because medians cannot be summed. The residuals are
 collected for it when they are not yet, as for Export CSV, and MetaFOCUS opens the file in the web
 browser.</p>
+<p>With more than one interior orientation group that has a report, Export HTML first asks whether to
+write the report of the group of the tab shown or one report for every group that has one. For every
+group, it asks for a folder and writes one HTML file per group, each under the file name that Export
+HTML proposes for that group. Two groups whose names give the same file name get _2, _3, and so on. Before it replaces
+reports in the folder, it asks. A progress dialog shows the group being written and can cancel the
+export. The Console names every file, a report that fails does not stop the others, and the folder
+opens at the end when a report was written.</p>
 <p>Spherical, cylindrical, and rational polynomial coefficient (RPC) groups have no distortion model
 of this kind: they show only the residual field, the other modes are disabled, and the profile panel
 is replaced by a note. For fisheye groups, the plots follow Metashape&rsquo;s equidistant fisheye
@@ -7264,13 +7383,23 @@ def _EchoInteriorOrientationTab(tabs, tabIndex):
         print("Interior Orientation Viewer: tab {} shown.".format(tabs.tabText(tabIndex)))
 
 
+def ApplySharedPlotChoices(tabWidget):
+    """Give the plots of the tab *tabWidget* the choices that apply to every
+    tab (the modes of the plots and the definitions of the residuals and
+    of the radial distortion, see BuildDistortionPlotsForSensor), as
+    showing the tab does.  Export HTML of every group does this before the
+    report of each tab, so that a report of a tab that was never shown
+    holds the same choices.  The reference of the Difference stays with
+    each tab."""
+    plotsWidget = getattr(tabWidget, '_plotsWidget', None)
+    applySharedModes = getattr(plotsWidget, '_applySharedModes', None) if plotsWidget is not None else None
+    if applySharedModes is not None:
+        applySharedModes()
+
+
 def _OnInteriorOrientationTabChanged(tabs, tabIndex):
     tabWidget = tabs.widget(tabIndex)
-    plotsWidget = getattr(tabWidget, '_plotsWidget', None)
-    if plotsWidget is not None:
-        applySharedModes = getattr(plotsWidget, '_applySharedModes', None)
-        if applySharedModes is not None:
-            applySharedModes()
+    ApplySharedPlotChoices(tabWidget)
     # The notes panel opens or closes as it was left on another tab.
     applySharedNotesPanelState = getattr(tabWidget, '_applySharedNotesPanelState', None)
     if applySharedNotesPanelState is not None:
@@ -7333,6 +7462,10 @@ class InteriorOrientationDialog(QtWidgets.QDialog):
                 groupImages, _ = SelectGroupImages(sensor, chunk)
                 if groupImages:
                     sensorsWithImageCounts.append((sensor, len(groupImages)))
+        # The number of interior orientation groups of the chunk, also of
+        # those without a tab, for the question of Export HTML
+        # (ReportScopeQuestionText).
+        self.chunkGroupCount = len(chunk.sensors) if chunk else 0
 
         # Plot settings shared by the tabs of all interior orientation
         # groups: a mode, magnification, or angle chosen on one tab carries
@@ -7430,18 +7563,30 @@ class InteriorOrientationDialog(QtWidgets.QDialog):
     def _ExportCsv(self, *unusedArguments):
         """Export CSV: ask for a file and write the values of the tab
         shown (TabCsvContent), collecting its residuals when they are not
-        collected yet."""
-        tabWidget = self.tabs.currentWidget() if self.tabs is not None else None
+        collected yet.  A tab without values says so
+        (NoReportOfTabShownText)."""
+        if self.tabs is None:
+            return
+        tabWidget = self.tabs.currentWidget()
         csvContent = getattr(tabWidget, "_csvContent", None)
         if csvContent is None:
+            QtWidgets.QMessageBox.information(self, "Interior Orientation Viewer", NoReportOfTabShownText(
+                self.tabs.tabText(self.tabs.currentIndex()), "Export CSV"))
             return
         path, _ = QtWidgets.QFileDialog.getSaveFileName(
             self, "Export CSV", getattr(tabWidget, "_csvFileName", "interiorOrientation.csv"),
             "CSV files (*.csv);;All files (*)")
         if not path:
             return
+        chosenPath = path
         if not os.path.splitext(path)[1]:
             path += ".csv"
+        if ReplacesUnconfirmedFile(chosenPath, path) and QtWidgets.QMessageBox.question(
+                self, "Interior Orientation Viewer", ReplaceUnconfirmedFileQuestionText(path),
+                QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+                QtWidgets.QMessageBox.No) != QtWidgets.QMessageBox.Yes:
+            print("Interior Orientation Viewer: Export CSV: " + DeclinedReplacingText(path))
+            return
         csvDelimiter, decimalSeparator = ChosenCsvFormat(self.csvFormatComboBox)
         try:
             WriteInteriorOrientationCsv(path, csvContent(), csvDelimiter, decimalSeparator)
@@ -7454,9 +7599,127 @@ class InteriorOrientationDialog(QtWidgets.QDialog):
             self.tabs.tabText(self.tabs.currentIndex()), path, CsvFormatName(csvDelimiter, decimalSeparator)))
 
     def _ExportReport(self, *unusedArguments):
-        """Export HTML: ask for a file, write the report of the tab shown
-        (TabReportData, interiorOrientationReport.WriteReport), name it in
-        the Console, and open it in the web browser."""
+        """Export HTML.  With more than one interior orientation group that
+        has a report, it first asks whether to write the report of the tab
+        shown or one report per group (_AskReportScope), and only offers one
+        report per group when the tab shown has no report.  Otherwise a tab
+        without a report says so (NoReportOfTabShownText)."""
+        if self.tabs is None:
+            return
+        reportTabs = ReportTabs(self.tabs)
+        tabShownHasReport = getattr(self.tabs.currentWidget(), "_reportData", None) is not None
+        if len(reportTabs) > 1:
+            reportScope = self._AskReportScope(len(reportTabs), tabShownHasReport)
+            if reportScope is None:
+                return
+            if reportScope == REPORT_SCOPE_EVERY_GROUP:
+                self._ExportReportOfEveryGroup(reportTabs)
+                return
+        if not tabShownHasReport:
+            QtWidgets.QMessageBox.information(self, "Interior Orientation Viewer", NoReportOfTabShownText(
+                self.tabs.tabText(self.tabs.currentIndex()), "Export HTML"))
+            return
+        self._ExportReportOfTabShown()
+
+    def _AskReportScope(self, groupCount, tabShownHasReport=True):
+        """The choice of Export HTML with *groupCount* interior orientation
+        groups that have a report (ReportScopeQuestionText, with the number
+        of tabs and of the groups of the chunk): REPORT_SCOPE_TAB_SHOWN,
+        REPORT_SCOPE_EVERY_GROUP, or None when it is cancelled.  The report
+        of the tab shown is offered only when it has one
+        (*tabShownHasReport*)."""
+        messageBox = QtWidgets.QMessageBox(self)
+        messageBox.setWindowTitle("Interior Orientation Viewer")
+        messageBox.setText(ReportScopeQuestionText(groupCount, self.tabs.count(), self.chunkGroupCount,
+                                                   tabShownHasReport))
+        tabShownButton = (messageBox.addButton("Group of the tab shown", QtWidgets.QMessageBox.AcceptRole)
+                          if tabShownHasReport else None)
+        everyGroupButton = messageBox.addButton("Every group", QtWidgets.QMessageBox.AcceptRole)
+        messageBox.addButton(QtWidgets.QMessageBox.Cancel)
+        messageBox.exec_()
+        clickedButton = messageBox.clickedButton()
+        if tabShownButton is not None and clickedButton == tabShownButton:
+            return REPORT_SCOPE_TAB_SHOWN
+        if clickedButton == everyGroupButton:
+            return REPORT_SCOPE_EVERY_GROUP
+        return None
+
+    def _ExportReportOfEveryGroup(self, reportTabs):
+        """Export HTML of every group: ask for a folder, write the report of
+        every tab of *reportTabs* (ReportTabs) under the name that Export
+        HTML proposes for its group (GroupReportPaths), after a question
+        when this replaces files, with a progress dialog that can cancel
+        it.  Each tab first gets the choices of the plots that apply to
+        every tab (ApplySharedPlotChoices).  A file that appears in the
+        folder during the export, at a path that was free at the question,
+        is kept, and its report is not written.  A report that fails does
+        not stop the others.  The Console names every file, and the folder
+        opens when a report was written."""
+        document = Metashape.app.document
+        documentPath = getattr(document, "path", "") if document is not None else ""
+        folder = QtWidgets.QFileDialog.getExistingDirectory(
+            self, "Export HTML: folder of the reports",
+            os.path.dirname(documentPath) if isinstance(documentPath, str) and documentPath else "")
+        if not folder:
+            return
+        paths = GroupReportPaths(folder, [tabWidget._reportFileName for tabText, tabWidget in reportTabs])
+        existingPaths = [path for path in paths if os.path.lexists(path)]
+        if existingPaths and QtWidgets.QMessageBox.question(
+                self, "Interior Orientation Viewer", ReplaceReportsQuestionText(existingPaths),
+                QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+                QtWidgets.QMessageBox.No) != QtWidgets.QMessageBox.Yes:
+            print("Interior Orientation Viewer: Export HTML of every group not run: replacing {:,} {} in {} was "
+                  "declined.".format(len(existingPaths), "report" if len(existingPaths) == 1 else "reports", folder))
+            return
+        progressDialog = QtWidgets.QProgressDialog("Writing the reports\u2026", "Cancel", 0, len(reportTabs), self)
+        progressDialog.setWindowTitle("Interior Orientation Viewer")
+        progressDialog.setWindowModality(QtCore.Qt.WindowModal)
+        progressDialog.setMinimumDuration(0)
+        writtenCount, failures, wasCancelled = 0, [], False
+        for reportIndex, ((tabText, tabWidget), path) in enumerate(zip(reportTabs, paths)):
+            progressDialog.setValue(reportIndex)
+            progressDialog.setLabelText("Writing the report of {} ({:,} of {:,})\u2026".format(
+                tabText, reportIndex + 1, len(reportTabs)))
+            QtWidgets.QApplication.processEvents()
+            if progressDialog.wasCanceled():
+                wasCancelled = True
+                break
+            # A file that another program put into the folder after the
+            # question is not replaced without a question.
+            if path not in existingPaths and os.path.lexists(path):
+                failures.append((tabText, APPEARED_REPORT_REASON_TEXT.format(os.path.basename(path))))
+                print("Interior Orientation Viewer: the report of tab {} was not written: {}.".format(
+                    tabText, APPEARED_REPORT_REASON_TEXT.format(path)))
+                continue
+            # The shared plot choices belong to the report of this tab, so
+            # that a failure there stops only this report.
+            try:
+                ApplySharedPlotChoices(tabWidget)
+                WriteReport(path, tabWidget._reportData())
+            except Exception as exportError:
+                failures.append((tabText, DescribeException(exportError)))
+                print("Interior Orientation Viewer: the report of tab {} could not be written: {}".format(
+                    tabText, DescribeException(exportError)))
+                continue
+            writtenCount += 1
+            print("Interior Orientation Viewer: report of tab {} written to {}.".format(tabText, path))
+        progressDialog.setValue(len(reportTabs))
+        message = EveryGroupReportMessage(len(reportTabs), writtenCount, failures, folder, wasCancelled)
+        print("Interior Orientation Viewer: " + " ".join(message.split()))
+        if failures:
+            QtWidgets.QMessageBox.warning(self, "Interior Orientation Viewer", message)
+        else:
+            QtWidgets.QMessageBox.information(self, "Interior Orientation Viewer", message)
+        if writtenCount:
+            try:
+                QtGui.QDesktopServices.openUrl(QtCore.QUrl.fromLocalFile(folder))
+            except Exception as suppressedError:
+                ReportSuppressedError("interiorOrientationViewer._ExportReportOfEveryGroup.open", suppressedError)
+
+    def _ExportReportOfTabShown(self):
+        """Export HTML of the tab shown: ask for a file, write the report of
+        the tab (TabReportData, interiorOrientationReport.WriteReport), name
+        it in the Console, and open it in the web browser."""
         tabWidget = self.tabs.currentWidget() if self.tabs is not None else None
         reportData = getattr(tabWidget, "_reportData", None)
         if reportData is None:
@@ -7466,8 +7729,15 @@ class InteriorOrientationDialog(QtWidgets.QDialog):
             "HTML files (*.html *.htm);;All files (*)")
         if not path:
             return
+        chosenPath = path
         if not os.path.splitext(path)[1]:
             path += ".html"
+        if ReplacesUnconfirmedFile(chosenPath, path) and QtWidgets.QMessageBox.question(
+                self, "Interior Orientation Viewer", ReplaceUnconfirmedFileQuestionText(path),
+                QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+                QtWidgets.QMessageBox.No) != QtWidgets.QMessageBox.Yes:
+            print("Interior Orientation Viewer: Export HTML: " + DeclinedReplacingText(path))
+            return
         try:
             WriteReport(path, reportData())
         except Exception as exportError:

@@ -30,12 +30,12 @@ viewer").  Printing the page, for example to a PDF file,
 gives the plots as set, each section starting on a new page.
 
 Author:      Geert J. Verhoeven (ORCID: 0000-0003-4825-9604)
-Version:     1.0.0 (2026-11-18)
+Version:     1.0.1 (2026-11-22)
 Date:        2026-10-10
 Licence:     GPL-3.0-or-later WITH GPL-3.0-linking-exception
 Contact:     geert.verhoeven@univie.ac.at
 Requires:    Agisoft Metashape Professional 2.x+
-Developed for: Agisoft Metashape Professional 2.3.2 (tested offline, see README.md)
+Developed for: Agisoft Metashape Professional 2.3.2
 
 Usage:
     Interior Orientation Viewer > Export HTML (one interior orientation
@@ -46,6 +46,10 @@ import datetime
 import html
 import json
 import math
+import os
+import tempfile
+
+from .photogrammetryUtilities import ReportSuppressedError
 
 # Version of the data that the page embeds (REPORT_DATA_ELEMENT_ID).
 REPORT_FORMAT_VERSION = 1
@@ -357,9 +361,31 @@ def ReportHtml(data):
 
 
 def WriteReport(path, data):
-    """Write the page of *data* to *path* (UTF-8)."""
-    with open(path, "w", encoding="utf-8", newline="\n") as reportFile:
-        reportFile.write(ReportHtml(data))
+    """Write the page of *data* to *path* (UTF-8).  The page is made first
+    and written to a new temporary file next to *path*, which then
+    replaces *path* (os.replace), so that a failure leaves an earlier file
+    at *path* as it was.  The temporary file of a failed write is
+    removed."""
+    pageHtml = ReportHtml(data)
+    fileDescriptor, temporaryPath = tempfile.mkstemp(
+        dir=os.path.dirname(os.path.abspath(path)), prefix=os.path.basename(path) + ".", suffix=".tmp")
+    try:
+        with os.fdopen(fileDescriptor, "w", encoding="utf-8", newline="\n") as reportFile:
+            reportFile.write(pageHtml)
+        os.replace(temporaryPath, path)
+    except BaseException:
+        RemoveTemporaryReport(temporaryPath)
+        raise
+
+
+def RemoveTemporaryReport(temporaryPath):
+    """Remove the temporary file of a failed WriteReport, when it is still
+    there (a failure is reported once in the Console)."""
+    try:
+        if os.path.lexists(temporaryPath):
+            os.remove(temporaryPath)
+    except OSError as suppressedError:
+        ReportSuppressedError("interiorOrientationReport.RemoveTemporaryReport", suppressedError)
 
 
 REPORT_PAGE_TEMPLATE = r"""<!DOCTYPE html>

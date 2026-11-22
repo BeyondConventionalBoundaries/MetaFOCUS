@@ -35,12 +35,12 @@ attributes to rounding is set to zero
 (DecomposeCovarianceMatrixWithRepair).
 
 Author:      Geert J. Verhoeven (ORCID: 0000-0003-4825-9604)
-Version:     1.0.0 (2026-11-18)
+Version:     1.0.1 (2026-11-22)
 Date:        2026-03-24
 Licence:     GPL-3.0-or-later WITH GPL-3.0-linking-exception
 Contact:     geert.verhoeven@univie.ac.at
 Requires:    Agisoft Metashape Professional 2.x+
-Developed for: Agisoft Metashape Professional 2.3.2 (tested offline, see README.md)
+Developed for: Agisoft Metashape Professional 2.3.2
 
 Dependencies:
     - photogrammetryUtilities.py (in the same MetaFOCUSCore package).
@@ -94,7 +94,8 @@ Notes:
       (CompanionCsvFilePath: _notExported added to the file name), so
       that the main file holds numbers only.  Both files are written to
       temporary files next to them and then replace the two files
-      together, or neither (ReplaceFilesTogether).  An existing file
+      together, or neither (ReplaceFilesTogether), which refuses a
+      folder at either path before anything moves.  An existing file
       that the save dialog did not confirm, such as a companion file
       that is not that of an earlier export to the same file, is
       replaced only after a question (FilesToConfirm).
@@ -559,6 +560,24 @@ def FilesToConfirm(chosenFilePath, outputFilePath):
     return filePaths
 
 
+def OutputPathsThatAreNoFiles(outputFilePath):
+    """The paths of an export to *outputFilePath* and of its companion file
+    (CompanionCsvFilePath) at which something exists that is not a file,
+    such as a folder, which the export refuses before it asks about
+    replacing files."""
+    return [filePath for filePath in (outputFilePath, CompanionCsvFilePath(outputFilePath))
+            if os.path.lexists(filePath) and not os.path.isfile(filePath)]
+
+
+def NoFileOutputPathsText(filePaths):
+    """The message when the export refuses the paths *filePaths*
+    (OutputPathsThatAreNoFiles)."""
+    if len(filePaths) == 1:
+        return "{} exists and is not a file (for example a folder), so nothing was exported.".format(filePaths[0])
+    return "{} exist and are not files (for example folders), so nothing was exported.".format(
+        " and ".join(filePaths))
+
+
 def ReplaceFilesQuestionText(filePaths):
     """The question before an export replaces the files *filePaths*
     (FilesToConfirm), which the save dialog did not confirm."""
@@ -581,12 +600,15 @@ def TemporarySiblingPath(filePath, suffix):
 
 def RemoveFileQuietly(filePath):
     """Remove the file *filePath* when it exists (a failure is reported
-    once in the Console)."""
+    once in the Console).  Returns False when the file could not be
+    removed, True otherwise."""
     try:
         if filePath is not None and os.path.exists(filePath):
             os.remove(filePath)
     except OSError as suppressedError:
         ReportSuppressedError("tiePointCovarianceExporter.RemoveFileQuietly", suppressedError)
+        return False
+    return True
 
 
 @contextlib.contextmanager
@@ -601,15 +623,49 @@ def TemporaryFilesRemovedOnFailure(temporaryFilePaths):
         raise
 
 
+def RollBackReplacedFiles(placedFinalPaths, backupPathByFinalPath):
+    """Give the final files of a failed ReplaceFilesTogether their earlier
+    content back: remove each placed final file *placedFinalPaths* that
+    did not exist before, and move each backup of
+    *backupPathByFinalPath* back onto its final file.  Returns a sentence
+    for each final file that stayed changed, naming the backup that keeps
+    its earlier content, which is then kept (an empty list when every
+    final file got its earlier content back)."""
+    changedFileSentences = []
+    for finalFilePath in reversed(placedFinalPaths):
+        if finalFilePath not in backupPathByFinalPath and not RemoveFileQuietly(finalFilePath):
+            changedFileSentences.append("{} was written and could not be removed.".format(finalFilePath))
+    for finalFilePath, backupFilePath in backupPathByFinalPath.items():
+        try:
+            os.replace(backupFilePath, finalFilePath)
+        except OSError as suppressedError:
+            ReportSuppressedError("tiePointCovarianceExporter.ReplaceFilesTogether", suppressedError)
+            changedFileSentences.append("{} could not get its earlier content back, which is kept in {}.".format(
+                finalFilePath, backupFilePath))
+    return changedFileSentences
+
+
 def ReplaceFilesTogether(filePathPairs):
     """Move each temporary file onto its final file, for the pairs
     (temporary path, final path) of *filePathPairs* in their order, all or
-    none.  An existing final file is first moved to a backup next to it.
+    none.  Before anything moves, each final path must be a file or
+    absent: when one is a folder, or anything else that is not a file,
+    the temporary files are removed and an OSError names it, so that
+    nothing at a final path changes, whichever operating system renames
+    what.  An existing final file is first moved to a backup next to it.
     When a move fails, for example because the file is open in another
     program, the final files get back their earlier content (a final file
-    that did not exist is removed), the temporary files are removed, and
-    an OSError names the file that failed.  The backups are removed after
-    the last move."""
+    that did not exist is removed, see RollBackReplacedFiles), the
+    temporary files are removed, and an OSError names the file that
+    failed.  When a final file cannot get its earlier content back, the
+    OSError names it and the backup that keeps that content.  The backups
+    are removed after the last move."""
+    for temporaryFilePath, finalFilePath in filePathPairs:
+        if os.path.lexists(finalFilePath) and not os.path.isfile(finalFilePath):
+            for temporaryFilePathToRemove, finalFilePathUnused in filePathPairs:
+                RemoveFileQuietly(temporaryFilePathToRemove)
+            raise OSError("{} exists and is not a file (for example a folder), so neither file was "
+                          "written".format(finalFilePath))
     backupPathByFinalPath = {}
     placedFinalPaths = []
     try:
@@ -626,16 +682,12 @@ def ReplaceFilesTogether(filePathPairs):
             os.replace(temporaryFilePath, finalFilePath)
             placedFinalPaths.append(finalFilePath)
     except OSError as replaceError:
-        for finalFilePath in reversed(placedFinalPaths):
-            if finalFilePath not in backupPathByFinalPath:
-                RemoveFileQuietly(finalFilePath)
-        for finalFilePath, backupFilePath in backupPathByFinalPath.items():
-            try:
-                os.replace(backupFilePath, finalFilePath)
-            except OSError as suppressedError:
-                ReportSuppressedError("tiePointCovarianceExporter.ReplaceFilesTogether", suppressedError)
+        changedFileSentences = RollBackReplacedFiles(placedFinalPaths, backupPathByFinalPath)
         for temporaryFilePath, finalFilePathUnused in filePathPairs:
             RemoveFileQuietly(temporaryFilePath)
+        if changedFileSentences:
+            raise OSError("{} could not be written ({}). {}".format(
+                failedFilePath, DescribeException(replaceError), " ".join(changedFileSentences))) from replaceError
         raise OSError("{} could not be written ({}), so neither file was changed".format(
             failedFilePath, DescribeException(replaceError))) from replaceError
     for backupFilePath in backupPathByFinalPath.values():
@@ -665,7 +717,8 @@ def ExportTiePointCovariances(chunk, outputFilePath,
                               coordinateDecimalPlaces=6,
                               uncertaintyDecimalPlaces=8,
                               csvDelimiter=",",
-                              decimalSeparator="."):
+                              decimalSeparator=".",
+                              skippedCountByReason=None):
     """Export tie-point positions and covariance data to a CSV or text file.
 
     Every tie point of the chunk that is not exported is written with
@@ -706,6 +759,12 @@ def ExportTiePointCovariances(chunk, outputFilePath,
         The comment lines and the header keep their text.  The
         companion file follows the same choice, and its reasons keep
         their text as well.
+    skippedCountByReason : dict or None
+        When given, receives the number of the points that skippedCount
+        counts for each of their reasons in the companion file (an
+        invalid tie point, no covariance, or a point at infinity), so
+        that the completion message gives a hint only for the reason
+        that applies.
 
     Returns
     -------
@@ -734,6 +793,7 @@ def ExportTiePointCovariances(chunk, outputFilePath,
     skippedCount = 0
     repairedCount = 0
     invalidCovariances = []
+    skippedReasonCounts = {}
 
     coordinateFormat = "{{:.{}f}}".format(coordinateDecimalPlaces)
     uncertaintyFormat = "{{:.{}f}}".format(uncertaintyDecimalPlaces)
@@ -769,6 +829,8 @@ def ExportTiePointCovariances(chunk, outputFilePath,
         for point in chunk.tie_points.points:
             if not point.valid:
                 skippedCount += 1
+                skippedReasonCounts[_NOT_EXPORTED_INVALID_TIE_POINT] = (
+                    skippedReasonCounts.get(_NOT_EXPORTED_INVALID_TIE_POINT, 0) + 1)
                 companionWriter.writerow(DataRowWithDecimalSeparator(
                     [point.track_id, _NOT_EXPORTED_INVALID_TIE_POINT], decimalSeparator,
                     _COMPANION_TEXT_COLUMN_INDICES))
@@ -777,6 +839,8 @@ def ExportTiePointCovariances(chunk, outputFilePath,
             internalCovariance = point.cov
             if HasNoCovariance(internalCovariance):
                 skippedCount += 1
+                skippedReasonCounts[_NOT_EXPORTED_WITHOUT_COVARIANCE] = (
+                    skippedReasonCounts.get(_NOT_EXPORTED_WITHOUT_COVARIANCE, 0) + 1)
                 companionWriter.writerow(DataRowWithDecimalSeparator(
                     [point.track_id, _NOT_EXPORTED_WITHOUT_COVARIANCE], decimalSeparator,
                     _COMPANION_TEXT_COLUMN_INDICES))
@@ -787,6 +851,8 @@ def ExportTiePointCovariances(chunk, outputFilePath,
                 transformMatrix, point.coord)
             if transformedCoordinate is None:
                 skippedCount += 1
+                skippedReasonCounts[_NOT_EXPORTED_AT_INFINITY] = (
+                    skippedReasonCounts.get(_NOT_EXPORTED_AT_INFINITY, 0) + 1)
                 companionWriter.writerow(DataRowWithDecimalSeparator(
                     [point.track_id, _NOT_EXPORTED_AT_INFINITY], decimalSeparator,
                     _COMPANION_TEXT_COLUMN_INDICES))
@@ -879,6 +945,8 @@ def ExportTiePointCovariances(chunk, outputFilePath,
     # The companion file first, so that a companion file that cannot be
     # replaced leaves the main file untouched.
     ReplaceFilesTogether([(temporaryFilePaths[1], companionFilePath), (temporaryFilePaths[0], outputFilePath)])
+    if skippedCountByReason is not None:
+        skippedCountByReason.update(skippedReasonCounts)
     if repairedCount:
         print("  {} with a negative eigenvalue attributed to rounding repaired before the export (all "
               "columns describe the symmetric part with that eigenvalue set to zero).".format(
@@ -1143,6 +1211,14 @@ class TiePointCovarianceDialog(QtWidgets.QDialog):
             return  # User cancelled.
         chosenFilePath = outputFilePath
         outputFilePath = ExportFilePathWithExtension(outputFilePath)
+        # A folder at an output path is refused before any question about
+        # replacing (ReplaceFilesTogether refuses it again just before the
+        # files are placed).
+        outputPathsThatAreNoFiles = OutputPathsThatAreNoFiles(outputFilePath)
+        if outputPathsThatAreNoFiles:
+            print("[{}] Nothing exported: {}".format(_TOOL_NAME, NoFileOutputPathsText(outputPathsThatAreNoFiles)))
+            QtWidgets.QMessageBox.warning(self, _TOOL_NAME, NoFileOutputPathsText(outputPathsThatAreNoFiles))
+            return
         # A file that the save dialog did not confirm is replaced only
         # after a question (FilesToConfirm).
         filesToConfirm = FilesToConfirm(chosenFilePath, outputFilePath)
@@ -1171,6 +1247,7 @@ class TiePointCovarianceDialog(QtWidgets.QDialog):
             print(settingsLine)
         print("")
 
+        skippedCountByReason = {}
         try:
             exportedCount, skippedCount, localFrameApplied, invalidCovariances = ExportTiePointCovariances(
                 chunk=chunk,
@@ -1183,6 +1260,7 @@ class TiePointCovarianceDialog(QtWidgets.QDialog):
                 uncertaintyDecimalPlaces=uncertaintyDecimalPlaces,
                 csvDelimiter=csvDelimiter,
                 decimalSeparator=decimalSeparator,
+                skippedCountByReason=skippedCountByReason,
             )
         except Exception as exportError:
             # For example a CSV file that is open in another program.
@@ -1230,7 +1308,9 @@ class TiePointCovarianceDialog(QtWidgets.QDialog):
                 FormatCountWithNoun(len(invalidCovariances), "tie point", "tie points"))
         completionMessage += "\nFile: {}".format(outputFilePath)
         completionMessage += "\nTie points not exported, with the reason for each: {}".format(companionFilePath)
-        if exportedCount == 0 and not invalidCovariances:
+        # The hint on the tie-point covariances only when some points had
+        # none (not when every point was invalid or at infinity).
+        if exportedCount == 0 and skippedCountByReason.get(_NOT_EXPORTED_WITHOUT_COVARIANCE, 0):
             completionMessage += (
                 "\n\nNothing was exported: tie-point covariances "
                 "exist only after Optimize Cameras has been run "
@@ -1249,7 +1329,7 @@ class TiePointCovarianceDialog(QtWidgets.QDialog):
 
 _ABOUT_HTML = """
 <h2>Tie Point Covariance Exporter</h2>
-<p><b>Version:</b> 1.0.0 (2026-11-18)<br>
+<p><b>Version:</b> 1.0.1 (2026-11-22)<br>
 <b>Author:</b> Geert J. Verhoeven
 (ORCID: <a href="https://orcid.org/0000-0003-4825-9604">
 0000-0003-4825-9604</a>)<br>
@@ -1397,14 +1477,16 @@ labelled [CRS].</p>
 standard deviations, semi-axes, and eigenvector components with the chosen number of uncertainty
 decimal places (eight by default). The save dialog offers a CSV file (.csv) and a text file (.txt),
 which hold the same table. A file name without either extension gets .csv. The file is written in
-UTF-8. The option <i>Delimiter and decimal separator</i> chooses a comma with a decimal point
+UTF-8. The option ‘Delimiter and decimal separator’ chooses a comma with a decimal point
 (1.25), a semicolon with a decimal comma (1,25, and 2,500000e-09 in scientific notation), or a tab
 with a decimal point. The semicolon with the decimal comma suits Excel with regional settings that
 use the decimal comma, for example German or French. A comment line at the top of the file keeps its
 text unchanged. The completion message and the Console name the file that was written and its
 companion file. When the export fails, for example because the file is open in another program, a
 message names the error. Both files are written together or not at all: when one of them cannot be
-written, both stay as they were.</p>
+written, the tool tries to give both files their earlier content back. A file that does not get it
+back is named in the message, with the backup file that keeps that content. When a folder has the
+name of either file, neither file is written and the folder stays as it is.</p>
 <p>Every tie point of the chunk that is not exported is written, with the reason, to a companion
 file next to the exported file. The companion file is named after the exported file with <code>_notExported</code>
 added before the extension (for example <code>tiePointCovarianceExport_site_Chunk1_notExported.csv</code>,

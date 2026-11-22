@@ -4,7 +4,7 @@ Manual and Terminology for Agisoft Metashape Professional
 
 Shows all About sections of MetaFOCUS, that of the toolbox and those of
 its tools in the order of the MetaFOCUS menu, and the terminology of
-MetaFOCUS in one window, taken from the code of the installed version.
+MetaFOCUS in one window, taken from the code of the version in use.
 In the running text of an About section, the first appearance of a term
 of the terminology links to its entry, and Back returns to where the
 reader was (headings, links, code, and names such as those of the tools
@@ -21,12 +21,12 @@ other files that a PDF reader warns about (Geert, 12 October 2026), and
 its contents list gives the page of every section.
 
 Author:      Geert J. Verhoeven (ORCID: 0000-0003-4825-9604)
-Version:     1.0.0 (2026-11-18)
+Version:     1.0.1 (2026-11-22)
 Date:        2026-10-09
 Licence:     GPL-3.0-or-later WITH GPL-3.0-linking-exception
 Contact:     geert.verhoeven@univie.ac.at
 Requires:    Agisoft Metashape Professional 2.x+
-Developed for: Agisoft Metashape Professional 2.3.2 (tested offline, see README.md)
+Developed for: Agisoft Metashape Professional 2.3.2
 
 Usage:
     MetaFOCUS > Manual and Terminology (registered by the MetaFOCUS
@@ -41,7 +41,8 @@ import re
 from PySide2 import QtWidgets, QtCore, QtGui
 
 from . import _METAFOCUS_VERSION, _METAFOCUS_DATE
-from .photogrammetryUtilities import DescribeException
+from .photogrammetryUtilities import (DeclinedReplacingText, DescribeException, ReplaceUnconfirmedFileQuestionText,
+                                      ReplacesUnconfirmedFile)
 
 _TOOL_NAME = "MetaFOCUS: Manual and Terminology"
 
@@ -335,7 +336,7 @@ def WriteManualPdf(toolboxAboutHtml, toolAboutPages, terminologyHtml, path, titl
 
 
 def SaveManualAsPdf(toolboxAboutHtml, path, title):
-    """Write Manual and Terminology of the installed version, for the About
+    """Write Manual and Terminology of the version in use, for the About
     of the toolbox that the loader passes, to the PDF file *path*."""
     from . import terminology
     return WriteManualPdf(toolboxAboutHtml, ToolAboutPages(), terminology._TERMINOLOGY_HTML, path, title)
@@ -345,12 +346,20 @@ def AskAndSavePdf(parent, html, defaultFileName, title, writePdf=None):
     """Ask for the PDF file (Save as PDF), write *html* to it, or call
     *writePdf* with the path and *title* when it is given, and name the
     file in the Console.  A failure is shown in a message and the Console.
+    A file at the path with the extension .pdf that was added after the
+    save dialog is replaced only after a question (ReplacesUnconfirmedFile).
     Returns the path written, or "" when nothing was written."""
-    path, _ = QtWidgets.QFileDialog.getSaveFileName(parent, "Save as PDF", defaultFileName,
-                                                    "PDF files (*.pdf);;All files (*)")
-    if not path:
+    chosenPath, _ = QtWidgets.QFileDialog.getSaveFileName(parent, "Save as PDF", defaultFileName,
+                                                          "PDF files (*.pdf);;All files (*)")
+    if not chosenPath:
         return ""
-    path = WithPdfExtension(path)
+    path = WithPdfExtension(chosenPath)
+    if ReplacesUnconfirmedFile(chosenPath, path) and QtWidgets.QMessageBox.question(
+            parent, title, ReplaceUnconfirmedFileQuestionText(path),
+            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+            QtWidgets.QMessageBox.No) != QtWidgets.QMessageBox.Yes:
+        print("{}: {}".format(title, DeclinedReplacingText(path)))
+        return ""
     try:
         if writePdf is not None:
             writePdf(path, title)

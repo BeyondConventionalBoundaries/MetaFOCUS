@@ -4,7 +4,7 @@ message: >-
   Verhoeven, G. J., Ressl, C., and Wieser, M. (2026). MetaFOCUS: a Python
   Toolbox for Optimising, Characterising, and Understanding
   Structure-from-Motion Pipelines in Agisoft Metashape Professional. 9th
-  ISPRS Low-Cost 3D Workshop, Braunschweig, Germany, 18 to 20 November 2026.
+  ISPRS Low-Cost 3D Workshop, Braunschweig, Germany, 18–20 November 2026.
 type: software
 title: "MetaFOCUS: Metashape Functions for Optimising, Characterising, and Understanding Structure from Motion"
 abstract: >-
@@ -17,8 +17,9 @@ authors:
     given-names: Geert J.
     orcid: "https://orcid.org/0000-0003-4825-9604"
     affiliation: "Department of Prehistoric and Historical Archaeology, University of Vienna"
-version: 1.0.0
-date-released: 2026-11-18
+version: 1.1.0
+date-released: 2026-11-22
+doi: 10.5281/zenodo.24341336
 license: GPL-3.0-or-later
 repository-code: "https://github.com/BeyondConventionalBoundaries/MetaFOCUS"
 keywords:

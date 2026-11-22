@@ -21,7 +21,7 @@ pipeline:
 A log that holds several Align Photos runs is split at every Align
 Photos parameter line, and one run is summarised, after a list of all
 runs: the run chosen in the list of runs above the tabs, by default the
-last run with a final tie point count in the log.
+last run with a tie point count in the log.
 
 Five graphs, drawn with QPainter on tabs next to the summary, show the
 image pairs that the log reports, the growth of the 3D tie points during
@@ -42,12 +42,12 @@ another chunk or project (OpenChunkWarnings), and a check box leaves the
 open chunk out, for comparing logs of other projects.
 
 Author:      Geert J. Verhoeven (ORCID: 0000-0003-4825-9604)
-Version:     1.0.0 (2026-11-18)
+Version:     1.0.1 (2026-11-22)
 Date:        2026-03-24
 Licence:     GPL-3.0-or-later WITH GPL-3.0-linking-exception
 Contact:     geert.verhoeven@univie.ac.at
 Requires:    Agisoft Metashape Professional 2.x+
-Developed for: Agisoft Metashape Professional 2.3.2 (tested offline, see README.md)
+Developed for: Agisoft Metashape Professional 2.3.2
 
 Usage:
     Loaded automatically by the MetaFOCUS loader.
@@ -81,14 +81,30 @@ from .photogrammetryUtilities import (ConsoleBlockEnd, ConsoleBlockStart, Consol
 # the number of the image in the log, X its keypoints.
 KEYPOINT_DETECTION_PATTERN        = re.compile(r'(?:\[(?:GPU|CPU)[^\]]*\]\s*)?\bphoto\s+(?P<imageNumber>\d+)\s*:\s*(?P<keypointCount>\d+)(?:\s*\[(?P<strongKeypointCount>\d+)\s*strong\])?\s*points', re.I)
 
+# The start of a line before the name of a task: white space, and the
+# timestamp that the Console writes, “2026-10-06 10:00:00 ”, so that a
+# task is recognised only where Metashape writes it, not where a text
+# names it, such as the Console output of this tool.
+_TASK_LINE_START = r'^\s*(?:\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\s+)?'
+
 # Parameter line of the SfM run: “AlignPhotos: key = value, …”
-ALIGN_PARAMETERS_PATTERN     = re.compile(r'AlignPhotos:\s*(.*)$', re.I)
+ALIGN_PARAMETERS_PATTERN     = re.compile(_TASK_LINE_START + r'AlignPhotos:\s*(.*)$', re.I)
 
 # Parameter line of image matching started from Python
 # (Chunk.matchPhotos), “MatchPhotos: key = value, …”, which comes without
-# an AlignPhotos: line (observed in Metashape 2.3.2).  It does not start
-# a run (RunsWithSeveralMatchings).
-MATCH_PHOTOS_PARAMETERS_PATTERN = re.compile(r'\bMatchPhotos:', re.I)
+# an AlignPhotos: line (observed in Metashape 2.3.2).  Within a run it
+# does not start a run (RunsWithSeveralMatchings), but after the lines of
+# another task it does (SplitLogIntoRuns).
+MATCH_PHOTOS_PARAMETERS_PATTERN = re.compile(_TASK_LINE_START + r'MatchPhotos:', re.I)
+
+# A line that shows that a task ended: “coordinates applied in 0 sec”, the
+# last line of the alignment of the images started from Python, and
+# “Finished processing in 17.982 sec (exit code 1)”, the last line of a
+# task in the Console (Metashape 2.3.2), each at the start of a line with
+# its time in seconds, so that a text that quotes these words is not
+# taken for the end of a run.
+RUN_END_PATTERN          = re.compile(
+    _TASK_LINE_START + r'(?:coordinates applied in|Finished processing in)\s+\d+(?:\.\d+)?\s+sec\b', re.I)
 
 # “NNN matches found”
 MATCHES_FOUND_PATTERN    = re.compile(r'(\d+)\s+matches\s+found', re.I)
@@ -108,7 +124,30 @@ SELECTED_TRACKS_PATTERN  = re.compile(r'selected\s+(\d+)\s+tracks out of\s+(\d+)
 PAIR_ROBUST_PATTERN      = re.compile(r'pair\s+(\d+)\s+and\s+(\d+)\s*:\s*(\d+)\s+robust(?:\s+from\s+(\d+))?', re.I)
 
 SIGMA_START_PATTERN      = re.compile(r'\bsigma filtering\b', re.I)
-ADDING_POINTS_PATTERN    = re.compile(r'adding\s+(\d+)\s+points(?:,\s*(\d+)\s+far)?', re.I)
+# “adding N points, F far (0.3 px threshold), I inaccurate, V invisible,
+# W weak”, one triangulation step: the added points, and the far,
+# inaccurate, invisible, and weak points, each None when the line does not
+# give it.  The line of the control points (“adding 4 control points”) is
+# not one.
+ADDING_POINTS_PATTERN    = re.compile(
+    r'adding\s+(\d+)\s+points(?:,\s*(\d+)\s+far(?:\s*\([^)]*\))?)?(?:,\s*(\d+)\s+inaccurate)?'
+    r'(?:,\s*(\d+)\s+invisible)?(?:,\s*(\d+)\s+weak)?', re.I)
+# The lines with which Metashape starts the triangulation of a run again
+# (“finished sfm in 2.234 seconds”, then “tracks initialized in 0.008
+# sec”, Metashape 2.3.2): a block of sigma filtering ends there, the next
+# adding lines count the 3D tie points again from zero, and the valid
+# count starts again at the next pt: line.
+TRACKS_REINITIALISED_PATTERN = re.compile(r'\b(?:finished\s+sfm|tracks\s+initialized)\s+in\b', re.I)
+
+# The first line of a task in the Console, its name followed by a colon at
+# the start of the line: a word of several capitalised parts, such as
+# AlignPhotos, OptimizeCameras, DuplicateChunk, or SaveProject
+# (Metashape 2.3.2).  A word of one part, such as “Warning:”, is not one.
+TASK_HEADER_PATTERN = re.compile(_TASK_LINE_START + r'([A-Z][a-z0-9]+(?:[A-Z][a-z0-9]*)+):(?:\s|$)')
+# The tasks whose lines belong to an SfM run: Align Photos, and image
+# matching and the orientation of the images started from Python
+# (Chunk.matchPhotos and Chunk.alignCameras).
+SFM_TASK_NAMES = ("AlignPhotos", "MatchPhotos", "AlignCameras")
 
 # “pt: (total, valid, weak)”
 POINT_TUPLE_PATTERN         = re.compile(r'pt:\s*\((\d+)\s*,\s*(\d+)\s*,\s*(\d+)\)', re.I)
@@ -221,7 +260,19 @@ def ParseSfmRunLines(runLines):
     "firstSfmLineIndex" is the 0-based index of the first line after which
     the counts hold an SfM line (IsAnySfmCountSet, as HasSfmLines), or None
     without one, so that FirstSfmLineNumber need not parse the lines
-    again."""
+    again.  "secondMatchingLineIndex" is the 0-based index of the first
+    MatchPhotos: line that follows an SfM line other than the parameter
+    line of Align Photos (IsAnySfmCountSet without the parameters, on the
+    counts of the lines before it), a second image matching in the run, or
+    None without one, so that RunsWithSeveralMatchings need not parse the
+    lines again.  "runEndAfterLastTuple" is True when a line after the
+    last “pt:” tuple shows that the task ended (RUN_END_PATTERN), so that
+    its count is the one at the end of the run
+    (IsFinalLogInlierCountConfirmed).  "trailingSteps",
+    "segmentStepCount", "segmentConsistent", and
+    "reinitialisedAfterLastTuple" describe the steps after the last tuple
+    and the steps before it since the tracks were initialised
+    (TrailingStepsResult)."""
     # accumulators
     interestPointCounts = []
     # image number of each detection line, in the order of
@@ -250,26 +301,38 @@ def ParseSfmRunLines(runLines):
     # “robust from …” form of a pair
     pairRobustMap = {}
 
+    # The added and the far points of the steps before the first sigma
+    # filtering and of the steps during sigma filtering.  The steps after
+    # the tracks were initialised again, before the next sigma filtering,
+    # count the 3D tie points again from zero and are kept apart
+    # ("reinitialisationStepNumbers").
     addedPointCountsBeforeSigmaFiltering, addedPointCountsDuringSigmaFiltering = [], []
     farPointCountsDuringSigmaFiltering = []
     farPointCountsBeforeSigmaFiltering = []
-    # points of the "adding" lines since the last "pt:" tuple, before and
-    # during sigma filtering
-    pointsAddedAfterLastTuple = []
-    pointsAddedAfterLastTupleDuringSigmaFiltering = []
-    # The far points of the "adding" lines since the last "pt:" tuple
-    # during sigma filtering, and whether every step of the current block
-    # of sigma filtering (from its "sigma filtering" line) obeys valid
-    # after = valid before + added - far, which shows that Metashape
-    # prints the "pt:" tuple of a step before the line that rejects its
-    # far points (a log of Metashape 2.3.2).
-    farPointsAfterLastTupleDuringSigmaFiltering = []
-    sigmaBlockPreviousValid = None
-    sigmaBlockStepCount = 0
-    sigmaBlockConsistent = True
+    reinitialisationStepNumbers = []
+    # The steps since the last "pt:" tuple, each (added, far, inaccurate,
+    # invisible, weak) with None for a count that its line does not give.
+    # Every valid count of a "pt:" tuple of the logs of Metashape 2.3.2 is
+    # the one before plus the added points minus the far and the
+    # inaccurate points of the steps between them, from the first tuple
+    # after the tracks were (again) initialised.  "segmentStepCount" counts
+    # the intervals between two tuples since then that were checked, and
+    # "segmentConsistent" says whether all of them obey this rule, so that
+    # TrailingStepsResult can apply it to the steps after the last tuple.
+    trailingSteps = []
+    segmentAnchorValid = None
+    segmentStepCount = 0
+    segmentConsistent = True
+    reinitialisedAfterLastTuple = False
     validPointCountBeforeSigmaFiltering = None
     finalPointTotal = finalPointValid = None
+    # sigmaStarted: the run has a sigma filtering line, as the summary
+    # needs it.  isDuringSigmaFiltering: the current line lies in a block
+    # of sigma filtering, from its line up to a line that initialises the
+    # tracks again (TRACKS_REINITIALISED_PATTERN).
     sigmaStarted = False
+    isDuringSigmaFiltering = False
+    isAfterReinitialisation = False
     # The orientation lines in their order, for the graph of the growth
     # of the 3D tie points: every "adding" line is a triangulation step
     # (added points, far points or None, during sigma filtering), every
@@ -280,9 +343,20 @@ def ParseSfmRunLines(runLines):
     pointTupleSteps = []
     sigmaFilteringStepCount = None
     firstSfmLineIndex = None
+    secondMatchingLineIndex = None
+    runEndAfterLastTuple = False
 
     # parse lines
     for lineIndex, logLine in enumerate(runLines):
+        # A MatchPhotos: line after the counts of an image matching is a
+        # second matching in the run.  The counts are those of the lines
+        # before it.
+        if secondMatchingLineIndex is None and MATCH_PHOTOS_PARAMETERS_PATTERN.search(logLine) and IsAnySfmCountSet(
+                None, interestPointCounts, tentativeTotal, filteredBase, indexedMatchCount, generatedTiepoints,
+                removedMultipleIndexCount, removedTracksCount, selectedTracks, totalProjections,
+                lastCameraEntityCounts, pairRobustMap, addedPointCountsBeforeSigmaFiltering,
+                addedPointCountsDuringSigmaFiltering, sigmaStarted, finalPointValid):
+            secondMatchingLineIndex = lineIndex
         # The counts are checked before each line until they hold an SfM
         # line, which is then the line before (the counts only grow).
         if firstSfmLineIndex is None and lineIndex > 0 and IsAnySfmCountSet(
@@ -301,6 +375,10 @@ def ParseSfmRunLines(runLines):
                     parameterKey, value = part.split("=", 1)
                     parsed.append((parameterKey.strip(), value.strip()))
             alignmentParameterPairs = parsed or []
+            continue
+
+        if RUN_END_PATTERN.search(logLine):
+            runEndAfterLastTuple = finalPointValid is not None
             continue
 
         match = KEYPOINT_DETECTION_PATTERN.search(logLine)
@@ -370,58 +448,66 @@ def ParseSfmRunLines(runLines):
             if not sigmaStarted:
                 sigmaFilteringStepCount = len(triangulationSteps)
             sigmaStarted = True
-            sigmaBlockPreviousValid, sigmaBlockStepCount, sigmaBlockConsistent = None, 0, True
+            isDuringSigmaFiltering = True
+            isAfterReinitialisation = False
+
+        if TRACKS_REINITIALISED_PATTERN.search(logLine):
+            isDuringSigmaFiltering = False
+            isAfterReinitialisation = True
+            segmentAnchorValid, segmentStepCount, segmentConsistent = None, 0, True
+            trailingSteps = []
+            reinitialisedAfterLastTuple = finalPointValid is not None
+            continue
 
         match = ADDING_POINTS_PATTERN.search(logLine)
         if match:
             pointsAddedInLine = int(match.group(1))
-            if sigmaStarted:
-                pointsAddedAfterLastTupleDuringSigmaFiltering.append(pointsAddedInLine)
-                farPointsAfterLastTupleDuringSigmaFiltering.append(int(match.group(2)) if match.group(2) else 0)
-            else:
-                pointsAddedAfterLastTuple.append(pointsAddedInLine)
-            if sigmaStarted:
+            stepCounts = tuple(None if value is None else int(value) for value in match.group(2, 3, 4, 5))
+            farPointCount = stepCounts[0]
+            trailingSteps.append((pointsAddedInLine,) + stepCounts)
+            if isDuringSigmaFiltering:
                 addedPointCountsDuringSigmaFiltering.append(pointsAddedInLine)
+                if farPointCount is not None:
+                    farPointCountsDuringSigmaFiltering.append(farPointCount)
+            elif isAfterReinitialisation:
+                reinitialisationStepNumbers.append(len(triangulationSteps) + 1)
             else:
                 addedPointCountsBeforeSigmaFiltering.append(pointsAddedInLine)
-            if match.group(2):
-                if sigmaStarted:
-                    farPointCountsDuringSigmaFiltering.append(int(match.group(2)))
-                else:
-                    farPointCountsBeforeSigmaFiltering.append(int(match.group(2)))
-            triangulationSteps.append((pointsAddedInLine, int(match.group(2)) if match.group(2) else None,
-                                       sigmaStarted))
+                if farPointCount is not None:
+                    farPointCountsBeforeSigmaFiltering.append(farPointCount)
+            triangulationSteps.append((pointsAddedInLine, farPointCount, isDuringSigmaFiltering))
             continue
+
+        # Metashape 2.3.2 writes the camera tuple and the point tuple on one
+        # line, “entities: cm: (5, 2, 0), st: (5, 2, 0), sn: (1, 1, 1, 1),
+        # pt: (316, 209, 0)”, so the camera tuple is read before the point
+        # tuple.
+        match = CAMERA_ENTITIES_PATTERN.search(logLine)
+        if match:
+            lastCameraEntityCounts = (int(match.group(1)), int(match.group(2)), int(match.group(3)))
 
         match = POINT_TUPLE_PATTERN.search(logLine)
         if match:
             totalPointCount, validPointCount = int(match.group(1)), int(match.group(2))
             if not sigmaStarted:
                 validPointCountBeforeSigmaFiltering = validPointCount
-            elif sigmaBlockPreviousValid is not None:
-                sigmaBlockStepCount += 1
-                if validPointCount != (sigmaBlockPreviousValid + sum(pointsAddedAfterLastTupleDuringSigmaFiltering)
-                                       - sum(farPointsAfterLastTupleDuringSigmaFiltering)):
-                    sigmaBlockConsistent = False
-            if sigmaStarted:
-                sigmaBlockPreviousValid = validPointCount
+            if segmentAnchorValid is not None:
+                segmentStepCount += 1
+                if validPointCount != segmentAnchorValid + StepsValidChange(trailingSteps):
+                    segmentConsistent = False
+            segmentAnchorValid = validPointCount
             finalPointTotal, finalPointValid = totalPointCount, validPointCount
-            pointsAddedAfterLastTuple = []
-            pointsAddedAfterLastTupleDuringSigmaFiltering = []
-            farPointsAfterLastTupleDuringSigmaFiltering = []
+            runEndAfterLastTuple = False
+            reinitialisedAfterLastTuple = False
+            trailingSteps = []
             pointTupleSteps.append((len(triangulationSteps), totalPointCount, validPointCount,
-                                    int(match.group(3)), sigmaStarted))
+                                    int(match.group(3)), isDuringSigmaFiltering))
             continue
 
         match = BLOCK_PATTERN.search(logLine)
         if match:
             blockCameraCount = int(match.group(1))
             totalProjections = int(match.group(3))
-            continue
-
-        match = CAMERA_ENTITIES_PATTERN.search(logLine)
-        if match:
-            lastCameraEntityCounts = (int(match.group(1)), int(match.group(2)), int(match.group(3)))
             continue
 
     if firstSfmLineIndex is None and runLines and IsAnySfmCountSet(
@@ -452,11 +538,11 @@ def ParseSfmRunLines(runLines):
         "addedPointCountsDuringSigmaFiltering": addedPointCountsDuringSigmaFiltering,
         "farPointCountsBeforeSigmaFiltering": farPointCountsBeforeSigmaFiltering,
         "farPointCountsDuringSigmaFiltering": farPointCountsDuringSigmaFiltering,
-        "pointsAddedAfterLastTuple": pointsAddedAfterLastTuple,
-        "pointsAddedAfterLastTupleDuringSigmaFiltering": pointsAddedAfterLastTupleDuringSigmaFiltering,
-        "farPointsAfterLastTupleDuringSigmaFiltering": farPointsAfterLastTupleDuringSigmaFiltering,
-        "lastSigmaBlockStepCount": sigmaBlockStepCount,
-        "lastSigmaBlockConsistent": sigmaBlockConsistent,
+        "reinitialisationStepNumbers": reinitialisationStepNumbers,
+        "trailingSteps": trailingSteps,
+        "segmentStepCount": segmentStepCount,
+        "segmentConsistent": segmentConsistent,
+        "reinitialisedAfterLastTuple": reinitialisedAfterLastTuple,
         "validPointCountBeforeSigmaFiltering": validPointCountBeforeSigmaFiltering,
         "finalPointTotal": finalPointTotal,
         "finalPointValid": finalPointValid,
@@ -466,6 +552,8 @@ def ParseSfmRunLines(runLines):
         "pointTupleSteps": pointTupleSteps,
         "sigmaFilteringStepCount": sigmaFilteringStepCount,
         "firstSfmLineIndex": firstSfmLineIndex,
+        "secondMatchingLineIndex": secondMatchingLineIndex,
+        "runEndAfterLastTuple": runEndAfterLastTuple,
     }
 
 
@@ -475,8 +563,11 @@ def IsAnySfmCountSet(alignmentParameterPairs, interestPointCounts, tentativeTota
                      addedPointCountsDuringSigmaFiltering, sigmaStarted, finalPointValid):
     """True when one of the counts of ParseSfmRunLines that only a line of
     an SfM run sets is set: the parameters of Align Photos or any count of
-    HasSfmCountLines.  ParseSfmRunLines checks its accumulators with it,
-    and HasSfmLines its counts, so that both use one rule."""
+    the other SfM lines, such as a keypoint, matching, or "pt:" line.
+    ParseSfmRunLines checks its accumulators with it, also without the
+    parameters (*alignmentParameterPairs* None) for a second image
+    matching in the run, and HasSfmLines its counts, so that all use one
+    rule."""
     return (alignmentParameterPairs is not None or bool(interestPointCounts) or tentativeTotal is not None
             or filteredBase is not None or indexedMatchCount is not None or generatedTiepoints is not None
             or removedMultipleIndexCount is not None or removedTracksCount is not None or selectedTracks is not None
@@ -498,33 +589,41 @@ def HasSfmLines(counts):
         counts["sigmaStarted"], counts["finalPointValid"])
 
 
-def HasSfmCountLines(counts):
-    """True when the parsed lines hold at least one line of an SfM run
-    other than the parameter line of Align Photos (ParseSfmRunLines),
-    such as a keypoint, matching, or "pt:" line (IsAnySfmCountSet without
-    the parameters)."""
-    return IsAnySfmCountSet(
-        None, counts["interestPointCounts"], counts["tentativeTotal"], counts["filteredBase"],
-        counts["indexedMatchCount"], counts["generatedTiepoints"], counts["removedMultipleIndexCount"],
-        counts["removedTracksCount"], counts["selectedTracks"], counts["totalProjections"],
-        counts["lastCameraEntityCounts"], counts["pairRobustMap"], counts["addedPointCountsBeforeSigmaFiltering"],
-        counts["addedPointCountsDuringSigmaFiltering"], counts["sigmaStarted"], counts["finalPointValid"])
+def TaskNameOfLine(logLine):
+    """The name of the task whose first line *logLine* is
+    (TASK_HEADER_PATTERN), for example "OptimizeCameras", or None."""
+    match = TASK_HEADER_PATTERN.match(logLine)
+    return match.group(1) if match else None
 
 
 def SplitLogIntoRuns(text):
     """The SfM runs of a log (plain text) in their order.  Every Align
     Photos parameter line (“AlignPhotos: …”) starts a new run, and the
     lines before the first such line form a run of their own, whose
-    start is not in the text.  Each run is a dictionary with its
-    "lines", the 1-based "firstLineNumber" of its first line in the
-    text, the first "timestamp" among its lines (None without one), and
-    "hasParameterLine"."""
+    start is not in the text.  The first line of another task
+    (TaskNameOfLine, not one of SFM_TASK_NAMES), such as
+    “OptimizeCameras: …” or “DuplicateChunk: …”, ends a run: its lines and
+    those after it belong to no run, so that the tie point counts and the
+    end of that task are not taken for those of the run.  The next line of
+    an SfM task starts a run again, a MatchPhotos: or AlignCameras: line
+    (a run started from Python) without a parameter line.  Each run is a
+    dictionary with its "lines", the 1-based "firstLineNumber" of its
+    first line in the text, the first "timestamp" among its lines (None
+    without one), and "hasParameterLine"."""
     runs = []
+    isOutsideRun = False
     for lineNumber, logLine in enumerate(text.splitlines(), 1):
         isParameterLine = bool(ALIGN_PARAMETERS_PATTERN.search(logLine))
-        if isParameterLine or not runs:
+        taskName = TaskNameOfLine(logLine)
+        if taskName is not None and taskName not in SFM_TASK_NAMES:
+            isOutsideRun = True
+            continue
+        if isOutsideRun and taskName is None:
+            continue
+        if isParameterLine or not runs or isOutsideRun:
             runs.append({"lines": [], "firstLineNumber": lineNumber, "timestamp": None,
                          "hasParameterLine": isParameterLine})
+            isOutsideRun = False
         currentRun = runs[-1]
         currentRun["lines"].append(logLine)
         if currentRun["timestamp"] is None:
@@ -591,19 +690,22 @@ def ParseSfmRuns(text):
     """The SfM runs of a log (SplitLogIntoRuns), each with its parsed
     "counts" (ParseSfmRunLines) and the project that the log names for
     it ("logProjectPath", LogProjectPathOfRun, None without one).  Lines
-    before the first Align Photos parameter line that hold no SfM line,
-    such as the loading of a project, are not a run.  A text without any
-    SfM run gives one run with all its lines, so that its summary shows
-    n/a throughout."""
+    before the first SfM line that hold no SfM line, such as the loading
+    of a project, are not a run.  A text without any SfM run gives one run
+    with all its lines and the counts of none, so that its summary shows
+    n/a throughout.  Its counts are the parse of the first run of
+    SplitLogIntoRuns, which holds no SfM line, or of no line when there is
+    none, so that every line of a run is parsed once and the lines of
+    another task, which belong to no run, are not parsed."""
+    splitRuns = SplitLogIntoRuns(text)
     runs = []
-    for run in SplitLogIntoRuns(text):
+    for run in splitRuns:
         run["counts"] = ParseSfmRunLines(run["lines"])
         if run["hasParameterLine"] or HasSfmLines(run["counts"]):
             runs.append(run)
     if not runs:
-        allLines = text.splitlines()
-        runs = [{"lines": allLines, "firstLineNumber": 1, "timestamp": None, "hasParameterLine": False,
-                 "counts": ParseSfmRunLines(allLines)}]
+        runs = [{"lines": text.splitlines(), "firstLineNumber": 1, "timestamp": None, "hasParameterLine": False,
+                 "counts": splitRuns[0]["counts"] if splitRuns else ParseSfmRunLines([])}]
     projectLines = ProjectLinesOfLog(text)
     for run in runs:
         run["logProjectPath"] = LogProjectPathOfRun(projectLines, FirstSfmLineNumber(run))
@@ -611,31 +713,32 @@ def ParseSfmRuns(text):
 
 
 def IsCompleteRun(counts):
-    """True when the log holds the final tie point count of the run, its
-    last “pt:” line.  A run without one was cancelled or failed, is
-    still running, or was copied only in part."""
+    """True when the log holds a tie point count of the run, a “pt:”
+    line, whose last one gives the count of the run
+    (IsFinalLogInlierCountConfirmed says whether it is the final one).  A
+    run without one was cancelled or failed, is still running, or was
+    copied only in part."""
     return counts["finalPointValid"] is not None
 
 
 def RunsWithSeveralMatchings(runs):
     """1-based numbers of the runs of *runs* in which a MatchPhotos: line
-    follows SfM count lines of the same run (HasSfmCountLines), that is,
-    a second image matching in one run.  Only AlignPhotos: lines start a
-    run, and matching started from Python (Chunk.matchPhotos) prints a
-    MatchPhotos: line without one, so such a run combines several runs.
+    follows an SfM line of the same run other than the parameter line of
+    Align Photos, such as a keypoint, matching, or "pt:" line, that is, a
+    second image matching in one run.  Within a run only AlignPhotos:
+    lines start a run (a MatchPhotos: line does only after the lines of
+    another task, SplitLogIntoRuns), and matching started from Python
+    (Chunk.matchPhotos) prints a MatchPhotos: line without one, so such a
+    run combines several runs.
     A MatchPhotos: line before the counts of its run, as Align Photos may
     print one, is not counted.  Each run is checked on its own, so that a
     run started from Python after a run of Align Photos is found and a
-    single run started from Python gives no warning."""
-    runNumbers = []
-    for runIndex, run in enumerate(runs):
-        runLines = run["lines"]
-        for lineIndex, logLine in enumerate(runLines):
-            if (lineIndex and MATCH_PHOTOS_PARAMETERS_PATTERN.search(logLine)
-                    and HasSfmCountLines(ParseSfmRunLines(runLines[:lineIndex]))):
-                runNumbers.append(runIndex + 1)
-                break
-    return runNumbers
+    single run started from Python gives no warning.  The parse of each run
+    recorded its first such line ("secondMatchingLineIndex" of its counts,
+    ParseSfmRunLines), so that the summary and the Console do not parse
+    the lines again."""
+    return [runIndex + 1 for runIndex, run in enumerate(runs)
+            if run["counts"]["secondMatchingLineIndex"] is not None]
 
 
 def PythonRunsNote(runs):
@@ -648,114 +751,145 @@ def PythonRunsNote(runs):
     value = ("run {}" if len(runNumbers) == 1 else "runs {}").format(
         JoinWithAnd([str(runNumber) for runNumber in runNumbers]))
     note = ("(a MatchPhotos: line follows the counts of an earlier matching in the same run: matching started "
-            "from Python prints a MatchPhotos: line without an AlignPhotos: line, and only AlignPhotos: lines "
-            "start a run, so the counts of such a run combine several runs)")
+            "from Python prints a MatchPhotos: line without an AlignPhotos: line, and such a line starts a run "
+            "only after the lines of another task, so the counts of such a run combine several runs)")
     return value, note
 
 
 def SelectSummarisedRunIndex(runs):
     """Index of the run that the summary covers by default: the last run
-    whose final tie point count is in the log, or the last run when no
-    run has one.  One run is summarised so that no count mixes two runs,
-    and the list of runs above the tabs can choose another."""
+    with a tie point count in the log (IsCompleteRun), or the last run
+    when no run has one.  One run is summarised so that no count mixes
+    two runs, and the list of runs above the tabs can choose another."""
     completeRunIndices = [index for index, run in enumerate(runs) if IsCompleteRun(run["counts"])]
     return completeRunIndices[-1] if completeRunIndices else len(runs) - 1
 
 
-def FinalLogInlierCount(counts):
-    """3D tie points (inliers) of the run in the log: the valid count of
-    its last “pt:” line plus the points of the “adding” lines after it
-    before sigma filtering, as long as that sum does not exceed the
-    selected tracks, or, during sigma filtering, minus the far points of
-    the adding lines after it when the log confirms that they belong to
-    the end of the run (TrailingFarPoints) (None without a “pt:” line).
-    The points of adding lines during sigma filtering are not added
-    (NOT_SUMMED_NOTE), as in the summary.  Without the far points after
-    the last pt: line subtracted, a log of Metashape 2.3.2 would give
-    2,194 for a chunk with 2,082 valid 3D tie points."""
-    finalPointValid = counts["finalPointValid"]
-    pointsAddedAfterLastTuple = counts["pointsAddedAfterLastTuple"]
-    selectedTracks = counts["selectedTracks"]
-    if finalPointValid is not None and pointsAddedAfterLastTuple:
-        correctedValidPointCount = finalPointValid + sum(pointsAddedAfterLastTuple)
-        if selectedTracks is None or correctedValidPointCount <= selectedTracks:
-            return correctedValidPointCount
-    trailingFarPoints = TrailingFarPoints(counts)
-    if finalPointValid is not None and trailingFarPoints["subtracted"]:
-        return finalPointValid - trailingFarPoints["farPoints"]
-    return finalPointValid
+def StepsValidChange(steps):
+    """The change of the valid count over the triangulation steps *steps*
+    ((added, far, inaccurate, invisible, weak), as "trailingSteps" of
+    ParseSfmRunLines): the added points minus the far and the inaccurate
+    points, a count that a line does not give taken as zero."""
+    return sum(added - (far or 0) - (inaccurate or 0) for added, far, inaccurate, _, _ in steps)
 
 
-# Why TrailingFarPoints does not subtract the far points after the last
-# pt: line, each with the end of the note of the summary that says so.
-TRAILING_FAR_POINTS_NO_EARLIER_STEP = "noEarlierStep"
-TRAILING_FAR_POINTS_ADDED = "added"
-TRAILING_FAR_POINTS_INCONSISTENT = "inconsistent"
-# More far points after the last pt: line than valid points in it, which
-# would give a negative count.
-TRAILING_FAR_POINTS_EXCEEDING = "exceeding"
-TRAILING_FAR_POINTS_REASON_TEXTS = {
-    TRAILING_FAR_POINTS_NO_EARLIER_STEP: ("its sigma filtering has no earlier step that confirms that a pt: line "
-                                          "comes before the far points of its step"),
-    TRAILING_FAR_POINTS_ADDED: "points are also added after it",
-    TRAILING_FAR_POINTS_INCONSISTENT: ("the earlier steps of its sigma filtering do not confirm that a pt: line "
-                                       "comes before the far points of its step"),
-    TRAILING_FAR_POINTS_EXCEEDING: "they outnumber the valid points of that line",
+# Why TrailingStepsResult does not apply the steps after the last pt:
+# line, each with the end of the note of the summary that says so.
+TRAILING_STEPS_NO_EARLIER_STEP = "noEarlierStep"
+TRAILING_STEPS_INCONSISTENT = "inconsistent"
+TRAILING_STEPS_INVISIBLE_OR_WEAK = "invisibleOrWeak"
+TRAILING_STEPS_REINITIALISED = "reinitialised"
+TRAILING_STEPS_OUT_OF_RANGE = "outOfRange"
+TRAILING_STEPS_REASON_TEXTS = {
+    TRAILING_STEPS_NO_EARLIER_STEP: ("no earlier step since the tracks were initialised shows how the counts of an "
+                                     "adding line change the valid count"),
+    TRAILING_STEPS_INCONSISTENT: ("an earlier step since the tracks were initialised does not give the valid count "
+                                  "before it plus the added points minus the far and the inaccurate points"),
+    TRAILING_STEPS_INVISIBLE_OR_WEAK: ("they report invisible or weak points, and no log has yet shown how these "
+                                       "change the valid count"),
+    TRAILING_STEPS_REINITIALISED: "the run initialised its tracks again after that line",
+    TRAILING_STEPS_OUT_OF_RANGE: "the count would be below zero or above the total of that line",
 }
 
 
-def TrailingFarPoints(counts):
-    """The far points of the adding lines after the last “pt:” line
-    during sigma filtering: {"farPoints": their sum, "lineCount": the
-    number of adding lines, "subtracted": whether FinalLogInlierCount
-    subtracts them, "reason": why far points are not subtracted, or None
-    (TRAILING_FAR_POINTS_NO_EARLIER_STEP, TRAILING_FAR_POINTS_ADDED,
-    TRAILING_FAR_POINTS_INCONSISTENT, or TRAILING_FAR_POINTS_EXCEEDING)}.
-    Metashape prints the pt: line of each step of sigma
-    filtering before the adding line that rejects the far points of that
-    step, so the far points after the last pt: line are rejected at the
-    end of the run (a log of Metashape 2.3.2).  They are subtracted only when the log
-    confirms this order for the run: at least one earlier step of the
-    same block of sigma filtering, every such step obeying valid after =
-    valid before + added - far, and no points added after the last pt:
-    line (the log does not say whether those are new), and only when they
-    do not outnumber the valid points of the last pt: line, which would
-    give a negative count (-1 for 91 far points after 90 valid points)."""
-    farPoints = counts.get("farPointsAfterLastTupleDuringSigmaFiltering") or []
-    addedPoints = counts.get("pointsAddedAfterLastTupleDuringSigmaFiltering") or []
-    farPointSum = sum(farPoints)
-    reason = None
-    if counts.get("finalPointValid") is not None and farPointSum > 0:
-        if farPointSum > counts["finalPointValid"]:
-            reason = TRAILING_FAR_POINTS_EXCEEDING
-        elif counts.get("lastSigmaBlockStepCount", 0) < 1:
-            reason = TRAILING_FAR_POINTS_NO_EARLIER_STEP
-        elif sum(addedPoints) != 0:
-            reason = TRAILING_FAR_POINTS_ADDED
-        elif not counts.get("lastSigmaBlockConsistent"):
-            reason = TRAILING_FAR_POINTS_INCONSISTENT
-    subtracted = counts.get("finalPointValid") is not None and farPointSum > 0 and reason is None
-    return {"farPoints": farPointSum, "lineCount": sum(1 for value in farPoints if value > 0),
-            "subtracted": subtracted, "reason": reason}
+def TrailingStepsResult(counts):
+    """The triangulation steps after the last “pt:” line of a run, whose
+    result the log no longer reports, and what they do to its valid
+    count: {"stepCount", "added", "far", "inaccurate" (their sums),
+    "applied": whether FinalLogInlierCount applies them, "reason": why
+    not, or None (TRAILING_STEPS_REASON_TEXTS), "count": the valid count
+    after them, or None when they are not applied}.  In the logs of
+    Metashape 2.3.2, every valid count of a pt: line is the one before
+    plus the added points minus the far and the inaccurate points of the
+    adding lines between them, before and during sigma filtering, from
+    the first pt: line after the tracks were initialised.  The steps
+    after the last pt: line are applied in the same way when the steps
+    before it since the tracks were initialised confirm the rule (at least
+    one, and every one of them), when the tracks were not initialised
+    again after that line (the next adding lines count the 3D tie points
+    again from zero), when they report no invisible or weak points (no
+    log has yet shown how these count), and when the count stays between
+    zero and the total of that line."""
+    steps = counts.get("trailingSteps") or []
+    result = {"stepCount": len(steps), "added": sum(step[0] for step in steps),
+              "far": sum(step[1] or 0 for step in steps), "inaccurate": sum(step[2] or 0 for step in steps),
+              "applied": False, "reason": None, "count": None}
+    finalPointValid = counts.get("finalPointValid")
+    if finalPointValid is None:
+        return result
+    if counts.get("reinitialisedAfterLastTuple"):
+        result["reason"] = TRAILING_STEPS_REINITIALISED
+        return result
+    if not steps:
+        result["count"] = finalPointValid
+        return result
+    count = finalPointValid + StepsValidChange(steps)
+    finalPointTotal = counts.get("finalPointTotal")
+    if counts.get("segmentStepCount", 0) < 1:
+        result["reason"] = TRAILING_STEPS_NO_EARLIER_STEP
+    elif not counts.get("segmentConsistent"):
+        result["reason"] = TRAILING_STEPS_INCONSISTENT
+    elif any(step[3] or step[4] for step in steps):
+        result["reason"] = TRAILING_STEPS_INVISIBLE_OR_WEAK
+    elif count < 0 or (finalPointTotal is not None and count > finalPointTotal):
+        result["reason"] = TRAILING_STEPS_OUT_OF_RANGE
+    else:
+        result["applied"], result["count"] = True, count
+    return result
+
+
+def FinalLogInlierCount(counts):
+    """3D tie points (inliers) of the run in the log: the valid count of
+    its last “pt:” line with the steps after it applied when the log
+    confirms how they change it (TrailingStepsResult), otherwise that
+    valid count as it stands (None without a “pt:” line).  For a log of
+    Metashape 2.3.2 whose run ends with 39 added, 115 far, and 9
+    inaccurate points after its last pt: line of 16,069 valid points, this
+    gives 15,984, the valid tie points of the chunk after the run."""
+    trailingSteps = TrailingStepsResult(counts)
+    return trailingSteps["count"] if trailingSteps["applied"] else counts.get("finalPointValid")
 
 
 def IsFinalLogInlierCountConfirmed(counts):
     """Whether the log confirms FinalLogInlierCount as the valid count at
-    the end of the run: no far points after the last pt: line left
-    unsubtracted (TrailingFarPoints), no points added after it during
-    sigma filtering, which are not summed, and no points added after it
-    before sigma filtering left out because they would exceed the
-    selected tracks.  Otherwise the summary calls the count the last
-    reported valid count."""
-    finalPointValid = counts["finalPointValid"]
-    if finalPointValid is None or TrailingFarPoints(counts)["reason"] is not None:
+    the end of the run: a line after the last pt: line shows that the
+    task ended ("runEndAfterLastTuple" of ParseSfmRunLines, a line of the
+    run, as another task ends the run, SplitLogIntoRuns), and the steps
+    after the last pt: line, if any, are applied (TrailingStepsResult).
+    Otherwise the summary calls the count the last reported valid count,
+    or the valid count after the last step in the log: a log that ends
+    after a pt: line can end in the middle of the run, and steps that
+    cannot be applied change the count by an amount that the log does not
+    give."""
+    if counts.get("finalPointValid") is None or not counts.get("runEndAfterLastTuple"):
         return False
-    if sum(counts.get("pointsAddedAfterLastTupleDuringSigmaFiltering") or []) > 0:
-        return False
-    pointsAddedAfterLastTuple = counts["pointsAddedAfterLastTuple"]
-    selectedTracks = counts["selectedTracks"]
-    return not (pointsAddedAfterLastTuple and selectedTracks is not None
-                and finalPointValid + sum(pointsAddedAfterLastTuple) > selectedTracks)
+    trailingSteps = TrailingStepsResult(counts)
+    return trailingSteps["applied"] or (trailingSteps["stepCount"] == 0 and trailingSteps["reason"] is None)
+
+
+def FinalCountKindText(counts):
+    """What the inlier count of the log (FinalLogInlierCount) is, for the
+    notes and the flowchart of the summary: "valid at the end of the run"
+    when the log confirms it (IsFinalLogInlierCountConfirmed), otherwise
+    "valid count after the last step in the log" when the steps after the
+    last pt: line were applied, or "last reported valid count" for the
+    valid count of the last pt: line as it stands."""
+    if IsFinalLogInlierCountConfirmed(counts):
+        return "valid at the end of the run"
+    if TrailingStepsResult(counts)["applied"]:
+        return "valid count after the last step in the log"
+    return "last reported valid count"
+
+
+def FinalCountRowLabel(counts):
+    """The label of the inlier count of the log in the section Orientation
+    estimation of the summary, after FinalCountKindText (the label of the
+    count at the end of the run also without a count)."""
+    if counts.get("finalPointValid") is None or IsFinalLogInlierCountConfirmed(counts):
+        return "  Valid 3D tie points at the end of the run:"
+    if TrailingStepsResult(counts)["applied"]:
+        return "  Valid count of 3D tie points after the last step in the log:"
+    return "  Last reported valid count of 3D tie points:"
 
 
 def LastKeypointCountByImage(counts):
@@ -832,13 +966,18 @@ def _TrackSourceText(selectedTracks, finalPointTotal):
     return ""
 
 
-# How a run is described.  The log shows no end marker of a run that the
-# parser could rely on before a Metashape 2.3.2 log has been checked, so
-# a run is described only by whether its final tie point count (a pt:
-# line) is in the log, never as complete or incomplete.
+# How a run is described: by whether the log confirms the count of its
+# last pt: line as the final one (IsFinalLogInlierCountConfirmed, which
+# needs a line of Metashape that ends the run, RUN_END_PATTERN), holds a
+# pt: line without that confirmation, or holds none, never as complete or
+# incomplete.
 RUN_WITH_FINAL_COUNT_TEXT = "with a final tie point count in the log"
+RUN_WITH_LAST_REPORTED_COUNT_TEXT = "with a last reported tie point count in the log"
 RUN_WITHOUT_FINAL_COUNT_TEXT = "without a final tie point count"
 RUN_WITHOUT_FINAL_COUNT_REASONS = "cancelled, failed, still running, or copied only in part"
+# The runs that 'Runs side by side' hatches: every run without a final
+# count, also one with a last reported count.
+HATCHED_RUN_REASONS = ("with a last reported count, or cancelled, failed, still running, or copied only in part")
 # The status of a text without a single line of an SfM run, in the
 # Summary, the list of runs, and the Console alike (Geert, 21 October
 # 2026: the Console follows the Summary).
@@ -855,11 +994,15 @@ def HoldsSfmRun(runs):
 
 
 def RunStatusText(counts):
-    """"with a final tie point count in the log" or "without a final tie
-    point count (cancelled, failed, still running, or copied only in
-    part)"."""
-    if IsCompleteRun(counts):
+    """"with a final tie point count in the log" when the log confirms the
+    count (IsFinalLogInlierCountConfirmed), "with a last reported tie
+    point count in the log" for a pt: line without that confirmation, or
+    "without a final tie point count (cancelled, failed, still running, or
+    copied only in part)"."""
+    if IsFinalLogInlierCountConfirmed(counts):
         return RUN_WITH_FINAL_COUNT_TEXT
+    if IsCompleteRun(counts):
+        return RUN_WITH_LAST_REPORTED_COUNT_TEXT
     return f"{RUN_WITHOUT_FINAL_COUNT_TEXT} ({RUN_WITHOUT_FINAL_COUNT_REASONS})"
 
 
@@ -903,9 +1046,14 @@ def RunCountsText(counts):
 
 
 def DefaultRunReason(runs):
-    """Why the run of SelectSummarisedRunIndex is shown by default."""
-    if IsCompleteRun(runs[SelectSummarisedRunIndex(runs)]["counts"]):
+    """Why the run of SelectSummarisedRunIndex is shown by default: the
+    last run with a tie point count in the log, called final only when
+    the log confirms it (IsFinalLogInlierCountConfirmed)."""
+    counts = runs[SelectSummarisedRunIndex(runs)]["counts"]
+    if IsFinalLogInlierCountConfirmed(counts):
         return "the last run with a final tie point count in the log"
+    if IsCompleteRun(counts):
+        return "the last run with a tie point count in the log"
     return "no run has a final tie point count in the log, so the last run is shown"
 
 
@@ -952,6 +1100,40 @@ def MatchedPairNote(possiblePairCount, matchedPairCount):
     if matchedPairCount is not None and possiblePairCount > matchedPairCount:
         noteText += f", the log does not report the other {_FormatNumber(possiblePairCount - matchedPairCount)}"
     return f"({noteText})"
+
+def TrailingStepsNote(counts, finalCountKindText):
+    """The note of the inlier count of the log in the summary: what the
+    count is (*finalCountKindText*, FinalCountKindText) and how it follows
+    from the last pt: line and the steps after it (TrailingStepsResult),
+    or why those steps are not applied."""
+    trailingSteps = TrailingStepsResult(counts)
+    stepCount = trailingSteps["stepCount"]
+    stepsText = "the adding line" if stepCount == 1 else "the {} adding lines".format(_FormatNumber(stepCount))
+    if trailingSteps["applied"]:
+        changeTexts = []
+        if trailingSteps["added"]:
+            changeTexts.append(FormatCountWithNoun(trailingSteps["added"], "point", "points") + " added")
+        rejectedTexts = [FormatCountWithNoun(trailingSteps[key], "{} point".format(key), "{} points".format(key))
+                         for key in ("far", "inaccurate") if trailingSteps[key]]
+        if rejectedTexts:
+            changeTexts.append(JoinWithAnd(rejectedTexts) + " rejected")
+        changeText = ", ".join(changeTexts) if changeTexts else "no point added or rejected"
+        return ("[{}: the valid count of its last pt: line, {}, with {} after it applied ({}), as in every earlier "
+                "step since the tracks were initialised]".format(
+                    finalCountKindText, _FormatNumber(counts["finalPointValid"]), stepsText, changeText))
+    note = "[{}: the valid count of its last pt: line]".format(finalCountKindText)
+    if trailingSteps["reason"] == TRAILING_STEPS_REINITIALISED:
+        note += " (no step after it applied, because {})".format(TRAILING_STEPS_REASON_TEXTS[trailingSteps["reason"]])
+    elif trailingSteps["reason"] is not None:
+        note += " ({} after it not applied, because {})".format(stepsText,
+                                                                TRAILING_STEPS_REASON_TEXTS[trailingSteps["reason"]])
+    return note
+
+
+# The note of the row with the triangulation steps after the tracks were
+# initialised again (one sentence).
+REINITIALISATION_NOTE = ("(after the log line “tracks initialized”, the adding lines count the 3D tie points "
+                         "again from zero, so the points of these steps are not summed)")
 
 # The note of the row with the triangulation steps during sigma filtering
 # (one sentence).
@@ -1034,6 +1216,7 @@ def SummariseHtml(text, label="(clipboard)", runs=None, runIndex=None, openChunk
     hasTriangulationSteps = bool(counts["triangulationSteps"])
     stepCountBeforeSigmaFiltering = len(addedPointCountsBeforeSigmaFiltering)
     stepCountDuringSigmaFiltering = len(addedPointCountsDuringSigmaFiltering)
+    stepCountAfterReinitialisation = len(counts.get("reinitialisationStepNumbers") or [])
     addedPointSumBeforeSigmaFiltering = sum(addedPointCountsBeforeSigmaFiltering)
     farPointSumBeforeSigmaFiltering = sum(farPointCountsBeforeSigmaFiltering)
     farPointSumDuringSigmaFiltering = sum(farPointCountsDuringSigmaFiltering)
@@ -1052,9 +1235,9 @@ def SummariseHtml(text, label="(clipboard)", runs=None, runIndex=None, openChunk
     if totalProjections is not None and selectedTracks is not None and selectedTracks > 0:
         averageProjectionFromTotals = totalProjections / selectedTracks
 
-    # final log inliers: the valid count of the last 'pt:' tuple plus the
-    # points of the "adding" lines after it before sigma filtering
-    # (FinalLogInlierCount)
+    # final log inliers: the valid count of the last 'pt:' tuple, with
+    # the steps after it applied when the log confirms how they change
+    # it (FinalLogInlierCount)
     finalPointValid = FinalLogInlierCount(counts)
 
     # tracks removed after selection (selected, not inliers)
@@ -1243,12 +1426,15 @@ def SummariseHtml(text, label="(clipboard)", runs=None, runIndex=None, openChunk
         if farPointCountsDuringSigmaFiltering:
             parts.append(_SummaryRowHtml("  Far points rejected during sigma filtering (sum over the steps):",
                                          _FormatNumber(farPointSumDuringSigmaFiltering)))
+    if stepCountAfterReinitialisation:
+        parts.append(_SummaryRowHtml("  Triangulation steps after the tracks were initialised again:",
+                                     _FormatNumber(stepCountAfterReinitialisation), REINITIALISATION_NOTE))
     # A count that the log does not confirm as the one at the end of the
-    # run is the last reported valid count.
-    isFinalCountConfirmed = IsFinalLogInlierCountConfirmed(counts)
-    parts.append(_SummaryRowHtml("  Valid 3D tie points at the end of the run:" if isFinalCountConfirmed or
-                                 finalPointValid is None else "  Last reported valid count of 3D tie points:",
-                                 _FormatNumber(finalPointValid),
+    # run is the last reported valid count, or the valid count after the
+    # last step in the log when the steps after the last pt: line were
+    # applied (FinalCountKindText).
+    finalCountKindText = FinalCountKindText(counts)
+    parts.append(_SummaryRowHtml(FinalCountRowLabel(counts), _FormatNumber(finalPointValid),
                                  "(the same count as under Final counts)" if finalPointValid is not None else ""))
     if hasTriangulationSteps:
         parts.append(_SummaryRowHtml("  Values of every triangulation step:", "see the Tie point growth graph"))
@@ -1267,37 +1453,7 @@ def SummariseHtml(text, label="(clipboard)", runs=None, runIndex=None, openChunk
     if not openChunk["isLeftOut"]:
         parts.append(_SummaryRowHtml("3D tie points (inliers, open chunk):", _FormatNumber(apiInliers),
                                      OpenChunkCountNote(openChunk)))
-    trailingFarPoints = TrailingFarPoints(counts)
-    if trailingFarPoints["subtracted"]:
-        logNote = ("[valid at the end of the run: the valid count of its last pt: line, {}, minus the {} of {} after "
-                   "it, as in every earlier step of its sigma filtering]".format(
-                       _FormatNumber(counts["finalPointValid"]),
-                       FormatCountWithNoun(trailingFarPoints["farPoints"], "far point", "far points"),
-                       "the adding line" if trailingFarPoints["lineCount"] == 1 else "the adding lines"))
-    else:
-        logNote = ("[{}: the valid count of its last pt: line plus the points of any adding lines after it before "
-                   "sigma filtering]".format("valid at the end of the run" if isFinalCountConfirmed
-                                             else "last reported valid count"))
-    pointsAddedBeforeSigmaFiltering = counts["pointsAddedAfterLastTuple"]
-    if (finalPointValid is not None and pointsAddedBeforeSigmaFiltering and selectedTracks is not None
-            and counts["finalPointValid"] is not None
-            and counts["finalPointValid"] + sum(pointsAddedBeforeSigmaFiltering) > selectedTracks):
-        logNote += (" ({} of {} after it before sigma filtering not added, because the sum would exceed the {} "
-                    "selected tracks)".format(
-                        FormatCountWithNoun(sum(pointsAddedBeforeSigmaFiltering), "point", "points"),
-                        FormatCountWithNoun(len(pointsAddedBeforeSigmaFiltering), "adding line", "adding lines"),
-                        _FormatNumber(selectedTracks)))
-    pointsNotAdded = counts["pointsAddedAfterLastTupleDuringSigmaFiltering"]
-    if finalPointValid is not None and pointsNotAdded and sum(pointsNotAdded) > 0:
-        logNote += (" ({} of {} after it during sigma filtering not added, because the log does not say "
-                    "whether they are new)".format(
-                        FormatCountWithNoun(sum(pointsNotAdded), "point", "points"),
-                        FormatCountWithNoun(len(pointsNotAdded), "adding line", "adding lines")))
-    if finalPointValid is not None and trailingFarPoints["reason"] is not None:
-        logNote += (" ({} of {} after its last pt: line not subtracted, because {})".format(
-            FormatCountWithNoun(trailingFarPoints["farPoints"], "far point", "far points"),
-            "the adding line" if trailingFarPoints["lineCount"] == 1 else "the adding lines",
-            TRAILING_FAR_POINTS_REASON_TEXTS[trailingFarPoints["reason"]]))
+    logNote = TrailingStepsNote(counts, finalCountKindText)
     parts.append(_SummaryRowHtml("3D tie points (inliers, log):", _FormatNumber(finalPointValid),
                                  f"({trackSourceText}) {logNote}" if trackSourceText else logNote))
     if openChunkDifference is not None:
@@ -1340,14 +1496,17 @@ def SummariseHtml(text, label="(clipboard)", runs=None, runIndex=None, openChunk
             duringSigmaFilteringTexts.append(FormatCountWithNoun(farPointSumDuringSigmaFiltering, "far point rejected",
                                                                  "far points rejected"))
         flowLines.append(f"   during sigma filtering: {', '.join(duringSigmaFilteringTexts)}")
+    if stepCountAfterReinitialisation:
+        flowLines.append("   after the tracks were initialised again: " + FormatCountWithNoun(
+            stepCountAfterReinitialisation, "triangulation step", "triangulation steps")
+                         + " (their points are not summed)")
     flowLines.append("   ↓")
     # The log value is the result of the SfM run. The open chunk's count is
     # shown next to it with its source, never in its place, and the line
     # after it gives their difference with its possible reasons.
     endLine = f"[Final]  3D tie points (inliers): {_FormatNumber(finalPointValid)} in the log"
     if finalPointValid is not None:
-        endLine += (" (valid at the end of the run" if isFinalCountConfirmed else " (last reported valid count") + (
-            f", {trackSourceText}" if trackSourceText else "") + ")"
+        endLine += f" ({finalCountKindText}" + (f", {trackSourceText}" if trackSourceText else "") + ")"
     if apiInliers is not None:
         endLine += f", {_FormatNumber(apiInliers)} in the open chunk{OpenChunkLabelSuffix(openChunk)} (valid now)"
     flowLines.append(endLine)
@@ -1993,6 +2152,23 @@ def OpenChunkConsoleLines(run, openChunk):
             + OpenChunkFindingConsoleLines(run, openChunk))
 
 
+def SigmaFilteringSpans(triangulationSteps):
+    """The blocks of sigma filtering among *triangulationSteps*
+    (ParseSfmRunLines): [(first step, last step)] of every run of
+    consecutive steps during sigma filtering, numbered from 1.  A run of
+    Metashape 2.3.2 has a second block after its tracks were initialised
+    again."""
+    spans = []
+    for stepNumber, step in enumerate(triangulationSteps, 1):
+        if not step[2]:
+            continue
+        if spans and spans[-1][1] == stepNumber - 1:
+            spans[-1] = (spans[-1][0], stepNumber)
+        else:
+            spans.append((stepNumber, stepNumber))
+    return spans
+
+
 def TiePointGrowthData(counts):
     """Values of the graph of the growth of the 3D tie points of a run
     (graph 2), or None when the run has no "adding" line
@@ -2000,13 +2176,15 @@ def TiePointGrowthData(counts):
     its added points and its far points (None when its line gives none).
     The added points are summed only over the steps before sigma
     filtering: the log does not say whether a step during sigma
-    filtering adds new 3D tie points or triangulates them again, so the
-    points of those steps are kept per step (step number, points).  The
-    valid count of every pt: line is placed at the number of steps before
-    it (0 before the first step).  Sigma filtering starts with step
-    firstSigmaFilteringStep, the step after the sigmaFilteringStepCount
-    steps before its line.  The final count is the 3D tie point count of
-    the log in the summary."""
+    filtering adds new 3D tie points or triangulates them again, and the
+    steps after the tracks were initialised again count them again from
+    zero, so the points of those steps are kept per step (step number,
+    points).  The valid count of every pt: line is placed at the number of
+    steps before it (0 before the first step).  Sigma filtering starts
+    with step firstSigmaFilteringStep, the step after the
+    sigmaFilteringStepCount steps before its first line, and lies in the
+    spans of SigmaFilteringSpans.  The final count is the 3D tie point
+    count of the log in the summary, of the kind of FinalCountKindText."""
     triangulationSteps = counts["triangulationSteps"]
     if not triangulationSteps:
         return None
@@ -2015,28 +2193,34 @@ def TiePointGrowthData(counts):
                                      else min(sigmaFilteringStepCount, len(triangulationSteps)))
     cumulativeAddedPointCounts = []
     runningTotal = 0
-    for addedPointCount, _, _ in triangulationSteps[:stepCountBeforeSigmaFiltering]:
-        runningTotal += addedPointCount
+    for step in triangulationSteps[:stepCountBeforeSigmaFiltering]:
+        runningTotal += step[0]
         cumulativeAddedPointCounts.append(runningTotal)
     farPointCounts = [step[1] for step in triangulationSteps]
+    reinitialisationStepNumbers = set(counts.get("reinitialisationStepNumbers") or [])
     return {
         "stepCount": len(triangulationSteps),
         "addedPointCounts": [step[0] for step in triangulationSteps],
         "cumulativeAddedPointCountsBeforeSigmaFiltering": cumulativeAddedPointCounts,
         "addedPointStepsDuringSigmaFiltering": [
             (stepNumber, step[0]) for stepNumber, step in enumerate(triangulationSteps, 1)
-            if stepNumber > stepCountBeforeSigmaFiltering],
+            if stepNumber > stepCountBeforeSigmaFiltering and step[2]],
+        "addedPointStepsAfterReinitialisation": [
+            (stepNumber, step[0]) for stepNumber, step in enumerate(triangulationSteps, 1)
+            if stepNumber in reinitialisationStepNumbers],
         "farPointCounts": farPointCounts,
         "farPointSumBeforeSigmaFiltering": sum(farPointCount for farPointCount
                                                in farPointCounts[:stepCountBeforeSigmaFiltering]
                                                if farPointCount is not None),
-        "farPointSumDuringSigmaFiltering": sum(farPointCount for farPointCount
-                                               in farPointCounts[stepCountBeforeSigmaFiltering:]
-                                               if farPointCount is not None),
+        "farPointSumDuringSigmaFiltering": sum(step[1] for stepNumber, step in enumerate(triangulationSteps, 1)
+                                               if stepNumber > stepCountBeforeSigmaFiltering and step[2]
+                                               and step[1] is not None),
         "validPointSteps": [(pointTupleStep[0], pointTupleStep[2]) for pointTupleStep in counts["pointTupleSteps"]],
         "sigmaFilteringStepCount": sigmaFilteringStepCount,
         "firstSigmaFilteringStep": None if sigmaFilteringStepCount is None else sigmaFilteringStepCount + 1,
+        "sigmaFilteringSpans": SigmaFilteringSpans(triangulationSteps),
         "finalLogInlierCount": FinalLogInlierCount(counts),
+        "finalCountKind": FinalCountKindText(counts),
     }
 
 
@@ -2098,7 +2282,8 @@ def RunComparisonData(runs, summarisedRunIndex):
     """Values of the runs graph (graph 5): the counts of every run of the
     log (RUN_COMPARISON_MEASURES, None where its line is missing), with
     the settings and the start of each run, whether the log holds its
-    final tie point count ("isComplete", IsCompleteRun), and whether it is
+    final tie point count ("isComplete", IsFinalLogInlierCountConfirmed,
+    so that a run with a last reported count is hatched), and whether it is
     the run chosen in the list of runs, which the summary and graphs 1 to
     4 show ("isSummarised").  None when the text holds no SfM run."""
     if not HoldsSfmRun(runs):
@@ -2113,7 +2298,7 @@ def RunComparisonData(runs, summarisedRunIndex):
             "inputImageCount": InputImageCount(counts),
             "settingsText": RunSettingsText(counts),
             "startText": RunStartText(run),
-            "isComplete": IsCompleteRun(counts),
+            "isComplete": IsFinalLogInlierCountConfirmed(counts),
             "isSummarised": runIndex == summarisedRunIndex,
         })
     return {"measures": list(RUN_COMPARISON_MEASURES), "runs": runEntries}
@@ -2205,14 +2390,17 @@ def StepBlockValues(data, blockSize, firstStep):
     """The steps of the growth graph in blocks of *blockSize* consecutive
     steps, counted from *firstStep*: [(index of the block, far points
     rejected in its steps or None when their lines give none, smallest
-    and largest points of its steps during sigma filtering or None)]."""
+    and largest points of its steps whose points are not summed, those
+    during sigma filtering and after the tracks were initialised again,
+    or None)]."""
     farPointsByBlock = {}
     for stepNumber, farPointCount in enumerate(data["farPointCounts"], 1):
         if farPointCount is not None:
             blockIndex = (stepNumber - firstStep) // blockSize
             farPointsByBlock[blockIndex] = farPointsByBlock.get(blockIndex, 0) + farPointCount
     sigmaPointsByBlock = {}
-    for stepNumber, addedPointCount in data["addedPointStepsDuringSigmaFiltering"]:
+    for stepNumber, addedPointCount in (data["addedPointStepsDuringSigmaFiltering"]
+                                        + (data.get("addedPointStepsAfterReinitialisation") or [])):
         sigmaPointsByBlock.setdefault((stepNumber - firstStep) // blockSize, []).append(addedPointCount)
     return [(blockIndex, farPointsByBlock.get(blockIndex),
              (min(sigmaPointsByBlock[blockIndex]), max(sigmaPointsByBlock[blockIndex]))
@@ -2610,12 +2798,31 @@ def PairConnectivityExplanation(data):
     return " ".join(sentences)
 
 
+# The label of the final count in the note of the growth graph, by its
+# kind (FinalCountKindText).
+FINAL_COUNT_KIND_NOTE_LABELS = {
+    "valid at the end of the run": "Final count in the log",
+    "valid count after the last step in the log": "Count after the last step in the log",
+    "last reported valid count": "Last reported count in the log",
+}
+
+
+def SigmaFilteringStartText(data):
+    """Where sigma filtering starts in the growth graph: "from step 12",
+    or "from steps 12 and 19" for two blocks (SigmaFilteringSpans)."""
+    firstSteps = [str(firstStep) for firstStep, _ in data.get("sigmaFilteringSpans") or []]
+    if len(firstSteps) > 1:
+        return "from steps " + JoinWithAnd(firstSteps)
+    return "from step {}".format(firstSteps[0] if firstSteps else data["firstSigmaFilteringStep"])
+
+
 def TiePointGrowthNote(data):
     """Note under the graph of the growth of the 3D tie points, in plain
     words: the steps, the added 3D tie points, and the far points of the
     phase before sigma filtering, the steps and far points of the phase
-    during sigma filtering (whose points are not summed), the final count
-    of the log, and the step with the most far points."""
+    during sigma filtering (whose points are not summed), the steps after
+    the tracks were initialised again, the final count of the log with its
+    kind, and the step with the most far points."""
     hasFarPoints = any(farPointCount is not None for farPointCount in data["farPointCounts"])
     cumulativeCounts = data["cumulativeAddedPointCountsBeforeSigmaFiltering"]
     phaseTexts = [FormatCountWithNoun(len(cumulativeCounts), "triangulation step", "triangulation steps")]
@@ -2636,12 +2843,18 @@ def TiePointGrowthNote(data):
                 phaseTexts.append(FormatCountWithNoun(data["farPointSumDuringSigmaFiltering"], "far point",
                                                       "far points") + " rejected")
             phaseTexts.append("the points of each step not summed")
-            sentences.append(f"During sigma filtering (from step {firstSigmaFilteringStep}): {', '.join(phaseTexts)}.")
+            sentences.append(f"During sigma filtering ({SigmaFilteringStartText(data)}): {', '.join(phaseTexts)}.")
         else:
             sentences.append("The sigma filtering line follows the last step, so no step is logged during sigma "
                              "filtering.")
+        reinitialisationSteps = data.get("addedPointStepsAfterReinitialisation") or []
+        if reinitialisationSteps:
+            sentences.append("After the tracks were initialised again (from step {}): {}, the points of each step "
+                             "not summed.".format(reinitialisationSteps[0][0], FormatCountWithNoun(
+                                 len(reinitialisationSteps), "triangulation step", "triangulation steps")))
     if data["finalLogInlierCount"] is not None:
-        sentences.append(f"Final count in the log: {_FormatNumber(data['finalLogInlierCount'])} valid 3D tie points.")
+        sentences.append(f"{FINAL_COUNT_KIND_NOTE_LABELS.get(data.get('finalCountKind'), 'Final count in the log')}: "
+                         f"{_FormatNumber(data['finalLogInlierCount'])} valid 3D tie points.")
     else:
         sentences.append(f"The log has no {POINT_TUPLE_LINE_FORM} line, so the valid 3D tie points are not drawn.")
     knownFarPointSteps = [(farPointCount, stepNumber) for stepNumber, farPointCount
@@ -2740,7 +2953,7 @@ def RunComparisonNote(data):
         sentences.append(f"Run {runEntry['runNumber']} ({', '.join(qualifiers)}): {runEntry['settingsText']}.")
     if any(not runEntry["isComplete"] for runEntry in data["runs"]):
         sentences.append(f"Hatched bars: runs {RUN_WITHOUT_FINAL_COUNT_TEXT} in the log "
-                         f"({RUN_WITHOUT_FINAL_COUNT_REASONS}).")
+                         f"({HATCHED_RUN_REASONS}).")
     if any(value is None for runEntry in data["runs"] for value in runEntry["values"]):
         sentences.append("n/a: not in the log of the run.")
     return " ".join(sentences)
@@ -3843,6 +4056,12 @@ TIE_POINT_GROWTH_ELEMENT_WORDS = {
 }
 
 
+def IsInSigmaFilteringSpan(spans, stepNumber):
+    """Whether the point after *stepNumber* steps of the growth graph lies
+    in one of the blocks of sigma filtering *spans* (SigmaFilteringSpans)."""
+    return any(firstStep <= stepNumber <= lastStep for firstStep, lastStep in spans)
+
+
 def TiePointGrowthDrawnElements(data, plotWidth):
     """What the graph of the growth of the 3D tie points draws for the
     values *data* of a run in a plot *plotWidth* screen pixels wide: the
@@ -3851,33 +4070,38 @@ def TiePointGrowthDrawnElements(data, plotWidth):
     (1 for single steps), and, as booleans (TIE_POINT_GROWTH_ELEMENT_WORDS),
     the blue line of the valid 3D tie points, its blue dots (only when
     the slots are at least MINIMUM_MARKER_SLOT_WIDTH pixels wide) and
-    whether the line runs outside and inside the light blue span, the
+    whether the line runs outside and inside the light blue spans, the
     pale orange band of the 3D tie points added so far, the light blue
-    span of sigma filtering, its hollow orange diamonds (single steps) or
-    orange vertical lines (blocks of steps), and the dark red bars of the
-    far points.  The drawing, the explanation, and the legend all follow
-    it, so that the texts name exactly what is drawn."""
+    spans of sigma filtering (one per block, SigmaFilteringSpans), the
+    hollow orange diamonds (single steps) or orange vertical lines (blocks
+    of steps) of the steps whose points are not summed, during sigma
+    filtering and after the tracks were initialised again, and the dark
+    red bars of the far points.  The drawing, the explanation, and the
+    legend all follow it, so that the texts name exactly what is drawn."""
     validPointSteps = data["validPointSteps"]
     firstStep = 0 if any(stepNumber == 0 for stepNumber, _ in validPointSteps) else 1
     slotCount = data["stepCount"] - firstStep + 1
     slotWidth = plotWidth / slotCount
     stepBlockSize = BlockSize(slotCount, plotWidth, MINIMUM_STEP_SLOT_WIDTH)
-    firstSigmaFilteringStep = data["firstSigmaFilteringStep"]
-    hasSigmaFilteringSpan = firstSigmaFilteringStep is not None and bool(data["addedPointStepsDuringSigmaFiltering"])
+    spans = data.get("sigmaFilteringSpans") or []
+    hasSigmaFilteringSpan = bool(spans) and bool(data["addedPointStepsDuringSigmaFiltering"])
+    hasNotSummedSteps = bool(data["addedPointStepsDuringSigmaFiltering"]
+                             or data.get("addedPointStepsAfterReinitialisation"))
     return {
         "firstStep": firstStep,
         "slotWidth": slotWidth,
         "stepBlockSize": stepBlockSize,
         "validLine": bool(validPointSteps),
         "validDots": bool(validPointSteps) and slotWidth >= MINIMUM_MARKER_SLOT_WIDTH,
-        "validLineOutsideSpan": any(not hasSigmaFilteringSpan or stepNumber < firstSigmaFilteringStep
+        "validLineOutsideSpan": any(not hasSigmaFilteringSpan or not IsInSigmaFilteringSpan(spans, stepNumber)
                                     for stepNumber, _ in validPointSteps),
-        "validLineInsideSpan": hasSigmaFilteringSpan and any(stepNumber >= firstSigmaFilteringStep
+        "validLineInsideSpan": hasSigmaFilteringSpan and any(IsInSigmaFilteringSpan(spans, stepNumber)
                                                              for stepNumber, _ in validPointSteps),
         "addedBand": bool(data["cumulativeAddedPointCountsBeforeSigmaFiltering"]),
         "sigmaSpan": hasSigmaFilteringSpan,
-        "sigmaDiamonds": hasSigmaFilteringSpan and stepBlockSize == 1,
-        "sigmaRangeLines": hasSigmaFilteringSpan and stepBlockSize > 1,
+        "sigmaDiamonds": hasNotSummedSteps and stepBlockSize == 1,
+        "sigmaRangeLines": hasNotSummedSteps and stepBlockSize > 1,
+        "reinitialisationSteps": bool(data.get("addedPointStepsAfterReinitialisation")),
         "farPointBars": any(farPointCount for farPointCount in data["farPointCounts"] if farPointCount is not None),
     }
 
@@ -3891,6 +4115,8 @@ def TiePointGrowthExplanation(data, drawnElements):
     words = TIE_POINT_GROWTH_ELEMENT_WORDS
     hasSigmaFilteringLine = data["firstSigmaFilteringStep"] is not None
     stepBlockSize = drawnElements["stepBlockSize"]
+    spanCount = len(data.get("sigmaFilteringSpans") or [])
+    spanWords = words["sigmaSpan"] + ("s" if spanCount > 1 else "")
     sentences = ["The 3D tie points at each triangulation step (one step per line “adding N points” of the log)."]
     if drawnElements["validLine"]:
         if drawnElements["validDots"]:
@@ -3903,7 +4129,7 @@ def TiePointGrowthExplanation(data, drawnElements):
             placeTexts = [placeText for placeText, isDrawnThere in (
                 ("outside", drawnElements["validLineOutsideSpan"]), ("inside", drawnElements["validLineInsideSpan"]))
                 if isDrawnThere]
-        placeText = f", {' and '.join(placeTexts)} the {words['sigmaSpan']}" if placeTexts else ""
+        placeText = f", {' and '.join(placeTexts)} the {spanWords}" if placeTexts else ""
         sentences.append(f"{subjectText} the valid 3D tie points after each step{placeText}.")
     if drawnElements["addedBand"]:
         sentences.append(f"The {words['addedBand']}"
@@ -3911,8 +4137,19 @@ def TiePointGrowthExplanation(data, drawnElements):
                          + " gives the 3D tie points added so far"
                          + (" before sigma filtering" if hasSigmaFilteringLine else "") + ".")
     if drawnElements["sigmaSpan"]:
-        spanText = f"The {words['sigmaSpan']} is sigma filtering, from step {data['firstSigmaFilteringStep']}"
-        if drawnElements["sigmaDiamonds"]:
+        if spanCount > 1:
+            spanText = f"The {spanWords} are sigma filtering, {SigmaFilteringStartText(data)}"
+        else:
+            spanText = f"The {words['sigmaSpan']} is sigma filtering, {SigmaFilteringStartText(data)}"
+        if spanCount > 1 or drawnElements["reinitialisationSteps"]:
+            stepsText = ("each step during sigma filtering and after the tracks were initialised again"
+                         if drawnElements["reinitialisationSteps"] else "each step during sigma filtering")
+            if drawnElements["sigmaDiamonds"]:
+                spanText += f", and the {words['sigmaDiamonds']} give the 3D tie points of {stepsText}, which are not summed"
+            elif drawnElements["sigmaRangeLines"]:
+                spanText += (f", and the {words['sigmaRangeLines']} give the fewest to the most 3D tie points of these "
+                             f"steps in each group of {stepBlockSize} steps, which are not summed")
+        elif drawnElements["sigmaDiamonds"]:
             spanText += (f", and its {words['sigmaDiamonds']} give the 3D tie points of each of its steps, which are "
                          "not summed")
         elif drawnElements["sigmaRangeLines"]:
@@ -3951,7 +4188,8 @@ def TiePointGrowthLegendItems(data, drawnElements):
         legendItems.append(("band", ADDED_POINT_BAND_COLOUR, f"{words['addedBand']}: added so far"
                             + (" before sigma filtering" if data["firstSigmaFilteringStep"] is not None else "")))
     if drawnElements["sigmaSpan"]:
-        legendItems.append(("shade", SIGMA_FILTERING_SHADE_COLOUR, f"{words['sigmaSpan']}: sigma filtering"))
+        spanWords = words["sigmaSpan"] + ("s" if len(data.get("sigmaFilteringSpans") or []) > 1 else "")
+        legendItems.append(("shade", SIGMA_FILTERING_SHADE_COLOUR, f"{spanWords}: sigma filtering"))
     if drawnElements["sigmaDiamonds"]:
         legendItems.append(("diamond", ADDED_POINT_COLOUR,
                             f"{words['sigmaDiamonds']}: points of each step, not summed"))
@@ -4008,8 +4246,11 @@ class TiePointGrowthGraph(SfmGraphWidget):
         stepCount = data["stepCount"]
         validPointSteps = data["validPointSteps"]
         cumulativeCounts = data["cumulativeAddedPointCountsBeforeSigmaFiltering"]
-        sigmaFilteringSteps = data["addedPointStepsDuringSigmaFiltering"]
-        firstSigmaFilteringStep = data["firstSigmaFilteringStep"]
+        # The steps whose points are not summed: those during sigma
+        # filtering and those after the tracks were initialised again.
+        notSummedSteps = sorted(data["addedPointStepsDuringSigmaFiltering"]
+                                + (data.get("addedPointStepsAfterReinitialisation") or []))
+        spans = data.get("sigmaFilteringSpans") or []
         # What is drawn is decided once, for the drawing, the explanation,
         # and the legend alike.
         drawnElements = self.DrawnElements(areaWidth)
@@ -4037,21 +4278,22 @@ class TiePointGrowthGraph(SfmGraphWidget):
         stepBlockSize = drawnElements["stepBlockSize"]
         drawsMarkers = drawnElements["validDots"]
 
-        # Sigma filtering: one shaded span across both panels, from its
-        # first step to the last step.
-        spanLeft = max(plotLeft, plotLeft + (firstSigmaFilteringStep - firstStep) * slotWidth
-                       if hasSigmaFilteringSpan else plotLeft)
-        if hasSigmaFilteringSpan:
+        # Sigma filtering: one shaded span across both panels for each
+        # block, from its first to its last step.
+        spanEdges = [(max(plotLeft, plotLeft + (spanFirstStep - firstStep) * slotWidth),
+                      min(plotLeft + plotWidth, plotLeft + (spanLastStep - firstStep + 1) * slotWidth))
+                     for spanFirstStep, spanLastStep in spans] if hasSigmaFilteringSpan else []
+        for spanLeft, spanRight in spanEdges:
             painter.setPen(QtCore.Qt.NoPen)
             painter.setBrush(_Colour(SIGMA_FILTERING_SHADE_COLOUR))
-            painter.drawRect(QtCore.QRectF(spanLeft, mainTop, plotLeft + plotWidth - spanLeft,
+            painter.drawRect(QtCore.QRectF(spanLeft, mainTop, spanRight - spanLeft,
                                            lowerTop + lowerHeight - mainTop))
 
         # Upper panel: the points added so far before sigma filtering, the
         # valid count of every pt: line, and the points of each step
         # during sigma filtering.
         upperValues = (cumulativeCounts + [validPointCount for _, validPointCount in validPointSteps]
-                       + [addedPointCount for _, addedPointCount in sigmaFilteringSteps])
+                       + [addedPointCount for _, addedPointCount in notSummedSteps])
         # The label of the span of sigma filtering lies at the top of the
         # plot, inside the span or left of it, where the valid count is
         # often highest, so the axis keeps a free row for it, also in a
@@ -4062,13 +4304,15 @@ class TiePointGrowthGraph(SfmGraphWidget):
         tickValues = TickValues(max(upperValues) * headroom, 5)
         _DrawCountAxis(painter, plotLeft, mainTop, plotWidth, mainHeight, tickValues, tickLabelWidth)
         scaleMaximum = tickValues[-1]
-        if hasSigmaFilteringSpan:
-            # One label for the span, inside it when it is wide enough,
-            # otherwise to its left.
-            painter.setFont(_Font(GRAPH_TEXT_POINT_SIZE, True))
-            painter.setPen(_Pen(SIGMA_MARKER_COLOUR))
-            spanLabel = f"sigma filtering, from step {firstSigmaFilteringStep}"
-            if plotLeft + plotWidth - spanLeft >= 190:
+        # One label for each span, inside it when it is wide enough,
+        # otherwise to its left: the first names sigma filtering, a later
+        # one only its first step.
+        painter.setFont(_Font(GRAPH_TEXT_POINT_SIZE, True))
+        painter.setPen(_Pen(SIGMA_MARKER_COLOUR))
+        for spanIndex, ((spanLeft, spanRight), (spanFirstStep, _)) in enumerate(zip(spanEdges, spans)):
+            spanLabel = (f"sigma filtering, from step {spanFirstStep}" if spanIndex == 0
+                         else f"from step {spanFirstStep}")
+            if spanRight - spanLeft >= (190 if spanIndex == 0 else 80):
                 _DrawTextInRectangle(painter, spanLeft + 6, mainTop + 2, 220, 14,
                                      QtCore.Qt.AlignLeft | QtCore.Qt.AlignTop, spanLabel)
             else:
@@ -4090,7 +4334,7 @@ class TiePointGrowthGraph(SfmGraphWidget):
         painter.setBrush(QtCore.Qt.NoBrush)
         if stepBlockSize == 1:
             diamondRadius = 4.0 if slotWidth >= 8.0 else 2.5
-            for stepNumber, addedPointCount in sigmaFilteringSteps:
+            for stepNumber, addedPointCount in notSummedSteps:
                 painter.drawPolygon(_Diamond(_StepCentreX(plotLeft, slotWidth, firstStep, stepNumber),
                                              _ValueY(mainTop, mainHeight, scaleMaximum, addedPointCount),
                                              diamondRadius))
@@ -4840,7 +5084,7 @@ def FittedDialogSize(availableWidth, availableHeight):
 
 _ABOUT_HTML = """
 <h2>SfM Log Parser</h2>
-<p><b>Version:</b> 1.0.0 (2026-11-18)<br>
+<p><b>Version:</b> 1.0.1 (2026-11-22)<br>
 <b>Author:</b> Geert J. Verhoeven
 (ORCID: <a href="https://orcid.org/0000-0003-4825-9604">
 0000-0003-4825-9604</a>)<br>
@@ -4888,15 +5132,27 @@ tie points at the end of the run. During Align Photos, Metashape prints at sever
 that holds <code>pt:</code> and three numbers in parentheses. The parser reads them as the counts of
 all 3D tie points at that moment, of the valid ones, and of the weak ones, and it uses the valid
 count (the second number). Agisoft does not document this log line. Metashape prints the <code>pt:</code>
-log line of each step of sigma filtering before that step rejects its far points. The valid count at
-the end of the run is therefore that of the last <code>pt:</code> log line minus the far points
-rejected after it. The parser subtracts them when the same sigma filtering has at least one earlier
-step, and every earlier step agrees with this order. Further conditions are that no points are added
-after the last <code>pt:</code> log line and that the far points do not outnumber its valid points.
-Otherwise, the parser gives the count of the last <code>pt:</code> log line as the last reported
-valid count and says why. As the log does not say whether a step during sigma filtering adds new 3D
-tie points or triangulates 3D tie points again, the points of the steps during sigma filtering are
-not summed. The values of every step are in the ‘Tie point growth’ graph.</li>
+log line of each step of sigma filtering before that step rejects its far points. In the logs of
+Metashape 2.3.2 checked so far, each valid count equals that of the <code>pt:</code> log line before
+it, plus the points added and minus the far and inaccurate points of the steps between them. The
+steps after the last <code>pt:</code> log line change the count once more, and the parser applies
+the same rule to them. It does so when at least one earlier step since the tracks were initialised
+follows this rule and none departs from it. Further conditions are that these steps report no
+invisible or weak points and that the count stays between zero and the total of that
+<code>pt:</code> log line. Otherwise, the parser gives the count of the last <code>pt:</code> log
+line as the last reported valid count and says why. After the log line &ldquo;tracks
+initialized&rdquo;, the steps count the 3D tie points again from zero, and the count starts again at
+the next <code>pt:</code> log line, before a second pass of sigma filtering. The summary calls a
+count the valid count at the end of the run only when a log line of the run after the last
+<code>pt:</code> log line shows that the run ended. Such a log line begins with &ldquo;coordinates
+applied in&rdquo; or &ldquo;Finished processing in&rdquo; and a time in seconds, after the date and
+time that the Console may write first. Without it, the count of the last <code>pt:</code> log line
+alone is the last reported valid count, and a count with the steps after it applied is the valid
+count after the last step in the log. As the log does not say whether a step during sigma filtering
+adds new 3D tie points or triangulates 3D tie points again, the points of the steps during sigma
+filtering are not summed. Nor are those of the steps after the log line &ldquo;tracks
+initialized&rdquo;, which count the 3D tie points again from zero. The values of every step are in
+the ‘Tie point growth’ graph.</li>
 <li><b>Final counts</b>: the 3D tie points (inliers) of the log and,
 when a project is open, the valid tie points of the open chunk, with
 the difference between the two (see The open chunk).</li>
@@ -4910,22 +5166,19 @@ Graphs).</li>
 <p>A count shows n/a when the log contains no log line for it, for example when only part of the log
 was copied. In other words, n/a means ‘not found in the log’, not zero.</p>
 <p>The inlier count of the log is the valid count (the second number) of the last <code>pt:</code>
-log line of the run plus the points of the log lines &ldquo;adding N points&rdquo; that follow it
-before sigma filtering. These points are added as long as that sum does not exceed the number of
-selected tracks. Alternatively, the inlier count is that valid count minus the far points of the log
-lines &ldquo;adding N points&rdquo; that follow the last <code>pt:</code> log line during sigma
-filtering. These far points are subtracted when the log confirms that they are rejected at the end
-of the run (see Orientation estimation above). During sigma filtering, a log line &ldquo;adding N
-points&rdquo; may report new 3D tie points or 3D tie points that are triangulated again, and the log
-does not say which. When such log lines follow the last <code>pt:</code> log line, the parser
-therefore does not add their points to the count of that <code>pt:</code> log line. The summary says
-how many points these log lines hold. The tracks given with the inlier count are those of the log
-line &ldquo;selected N tracks out of M&rdquo;.</p>
+log line of the run, with the log lines &ldquo;adding N points&rdquo; after it applied by the rule of
+Orientation estimation above. When the rule cannot be applied, the inlier count is the valid count of
+that <code>pt:</code> log line as it stands, the last reported valid count, and the summary says
+why. The summary also gives the points that these log lines add and reject. The tracks given with
+the inlier count are those of the log line &ldquo;selected N tracks out of M&rdquo;.</p>
 <p>The count of the open chunk is the number of tie points of the open chunk whose valid flag is
 set, read from Metashape when the log is parsed. Every valid tie point counts, including one seen on
 fewer than two enabled, oriented images, which the count ‘Tie points in the adjustment’ of the
-Interior Orientation Viewer leaves out. The two counts agree when the log belongs to the open chunk
-and its tie points have not changed since the run, but equal counts alone cannot establish either.
+Interior Orientation Viewer leaves out. The two counts agree when the log gives the valid count at the
+end of the run and belongs to the open chunk, and when the tie points of the chunk have not changed
+since the run. Equal
+counts alone cannot establish that the log belongs to the open chunk or that its tie points are
+unchanged.
 The open chunk holds fewer valid tie points
 when tie points were removed after the run, for example after gradual selection (also by the Gradual
 Selection Filter) or by hand. The open chunk holds more valid tie points when tie points were added,
@@ -4959,22 +5212,31 @@ again and to show its values at once, without parsing the log again.</p>
 <h3>Several runs in one log</h3>
 <p>A Console log can hold several Align Photos runs, for example when the images were oriented again
 with other settings. The parser splits the text at every parameter log line of Align Photos (<code>AlignPhotos:</code>)
-and summarises one run only, so that no count mixes two runs. By default, this is the last run whose
-final tie-point count (its last <code>pt:</code> log line) is in the log, or the last run when no
-run has one. No Metashape 2.3.2 log has yet shown which log line ends a run. Until then, a run is
-described only as &ldquo;with a final tie point count in the log&rdquo; or as &ldquo;without a final
-tie point count&rdquo; (cancelled, failed, still running, or copied only in part). When the text
-holds more than one run, the summary starts with a list of all runs. The list gives the log line and
-time at which each run starts, its main counts, and whether the log holds its final tie-point count.
+and summarises one run only, so that no count mixes two runs. The log line that starts another task,
+for example <code>OptimizeCameras:</code> or <code>DuplicateChunk:</code>, ends a run. The log lines
+of that task belong to no run, so that its counts and end are not taken for those of the run.
+By default, the summary covers the last run with a
+tie point count (a <code>pt:</code> log line) in the log, or the last run when no run has one. A run
+is described as &ldquo;with a final tie point count in the log&rdquo; when the log gives its valid
+count at the end of the run (see Orientation estimation above). It is described as &ldquo;with a
+last reported tie point count in the log&rdquo; when the log holds a <code>pt:</code> log line of
+the run but does not give that count. The end of the run is then missing, or the steps after the
+last <code>pt:</code> log line cannot be applied. Otherwise, it is described as &ldquo;without a
+final tie point count&rdquo; (cancelled, failed, still running, or copied only in part). When the
+text holds more than one run, the summary starts with a list of all runs. The list gives the log line
+and time at which each run starts, its main counts, and which of these descriptions applies.
 The summary also names the run that it covers. To summarise another run, choose it in the list of
 runs above the tabs. When the log lines before the first parameter log line of Align Photos include
 log lines of an SfM run, they form a run whose start is not in the text. A text without any such
-parameter log line is read as one run. A text without a single log line of an SfM run holds no run,
-and the Summary, the list of runs, and the Console say that no SfM run was found.</p>
-<p>Only the parameter log line of Align Photos (<code>AlignPhotos:</code>) starts a run. Image
-matching started from Python (Chunk.matchPhotos) prints a <code>MatchPhotos:</code> log line but no
-such parameter log line. The runs of a script are therefore not separated, and the counts of a run
-can then combine several runs. When a <code>MatchPhotos:</code> log line follows the counts of an
+parameter log line is read as one run, up to the first log line of another task. A text without a
+single log line of an SfM run holds no run, and the Summary, the list of runs, and the Console say
+that no SfM run was found.</p>
+<p>Only the parameter log line of Align Photos (<code>AlignPhotos:</code>) starts a run, and after
+the log lines of another task, the next <code>MatchPhotos:</code> or <code>AlignCameras:</code> log
+line does as well. Image matching started from Python (Chunk.matchPhotos) prints a
+<code>MatchPhotos:</code> log line but no such parameter log line. The runs of a script are therefore
+separated only where the log lines of another task lie between them, and the counts of a run can
+otherwise combine several runs. When a <code>MatchPhotos:</code> log line follows the counts of an
 earlier image matching in the same run, the summary and the Console name that run (as ‘Runs started
 from Python’). Logs of the Align Photos command are the logs that the parser supports.</p>
 
@@ -5023,14 +5285,15 @@ orientation tends to fail.</p>
 &ldquo;adding N points&rdquo;. In the upper panel, the blue line and its blue dots (one dot per
 valid count in the log) give the valid 3D tie points after each step, before and during sigma
 filtering. The pale-orange band under the blue line gives the 3D tie points added so far before
-sigma filtering, and it stays visible where the two counts are equal. Sigma filtering is the shaded
-span in light blue, labelled with its first step. Its hollow orange diamonds show the 3D tie points
-for each step, which are not summed. The dark-red bars in the lower panel show the far points
-rejected at each step.</p>
+sigma filtering, and it stays visible where the two counts are equal. Each pass of sigma filtering
+is a shaded span in light blue, labelled with its first step. Its hollow orange diamonds show the 3D
+tie points for each step, which are not summed. Diamonds outside the spans belong to the steps after
+the log line &ldquo;tracks initialized&rdquo;, which count the 3D tie points again from zero. The
+dark-red bars in the lower panel show the far points rejected at each step.</p>
 <p>With many steps, the dots are left out. With still more steps, the dark-red bars give the far
 points of groups of consecutive steps, and orange vertical lines replace the diamonds. These lines
-run from the fewest to the most 3D tie points of a group’s steps during sigma filtering. The blue
-line and the band, however, keep one point per step. The explanation above the graph names only what
+run from the fewest to the most 3D tie points of a group’s steps whose points are not summed. The
+blue line and the band, however, keep one point per step. The explanation above the graph names only what
 is drawn. Attention should go to steps with many far points and to the way in which the valid count
 changes during sigma filtering. The count of 3D tie points of the log in the summary follows from
 the last valid count, as described in Reading the counts.</p>
@@ -5051,7 +5314,8 @@ stage is given as a percentage of the stage above it where both count the same t
 tracks and 3D tie points). Attention should go to the stage at which the count falls most.</p>
 <p><b>Runs side by side</b>: the keypoints, selected tracks, 3D tie points of the log, and oriented
 images of every run, one panel per count and one bar per run. Bars for a run without a final
-tie-point count in the log are hatched, and the run selected in the list of runs is outlined. The
+tie-point count in the log, also one with a last reported count, are hatched, and the run selected
+in the list of runs is outlined. The
 note lists the settings of each run (downscale, keypoint limit, and tie point limit), so that runs
 with different settings (e.g. downscale 1 and 2) can be compared in one view.</p>
 <p><b>Shared tie points</b>: which enabled, oriented images of the open chunk share valid 3D tie

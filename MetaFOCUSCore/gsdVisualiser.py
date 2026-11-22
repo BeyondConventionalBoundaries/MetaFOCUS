@@ -60,10 +60,10 @@ statistics and the charts, and the loading names their lines.
 
 Author:     Geert J. Verhoeven (ORCID: 0000-0003-4825-9604)
 Contact:    geert.verhoeven@univie.ac.at
-Version:    1.0.0 (2026-11-18)
+Version:    1.0.1 (2026-11-22)
 Licence:    GPL-3.0-or-later WITH GPL-3.0-linking-exception
 Requires:   Agisoft Metashape Professional 2.x
-Developed for: Agisoft Metashape Professional 2.3.2 (tested offline, see README.md)
+Developed for: Agisoft Metashape Professional 2.3.2
 """
 
 import csv
@@ -252,6 +252,14 @@ GSD_DEFINITION_AREA_EQUIVALENT = "area-equivalent"
 GSD_DEFINITION_GEOMETRIC_MEAN = "geometric mean of the row and column sampling distances"
 
 
+# The names of the GSD columns that GsdScalarColumn recognises, in lower
+# case and in the order in which it prefers them, with their definitions.
+_RECOGNISED_GSD_COLUMNS = (("gsd_areaequivalent", GSD_DEFINITION_AREA_EQUIVALENT),
+                           ("gsd_mean", GSD_DEFINITION_GEOMETRIC_MEAN),
+                           ("gsd_mean_m", GSD_DEFINITION_GEOMETRIC_MEAN),
+                           ("gsd_geometricmean", GSD_DEFINITION_GEOMETRIC_MEAN))
+
+
 def GsdScalarColumn(columnNames):
     """(column name, definition) of the GSD that the statistics, the
     histograms, and the heat map use: the area-equivalent GSD in
@@ -259,15 +267,16 @@ def GsdScalarColumn(columnNames):
     in a file without that column, the geometric mean of the row and
     column sampling distances in GSD_mean or GSD_mean_m (definition
     GSD_DEFINITION_GEOMETRIC_MEAN), and a file with only
-    GSD_geometricMean is read as such as well.  Any other column whose
-    name contains GSD (GSD_m, for example) is used with the definition None,
-    which the file does not state.  (None, None) without a GSD column."""
-    for keyword, definition in (("gsd_areaequivalent", GSD_DEFINITION_AREA_EQUIVALENT),
-                                ("gsd_mean", GSD_DEFINITION_GEOMETRIC_MEAN),
-                                ("gsd_geometricmean", GSD_DEFINITION_GEOMETRIC_MEAN)):
-        columnName = AutodetectColumn(columnNames, [keyword])
-        if columnName is not None:
-            return columnName, definition
+    GSD_geometricMean is read as such as well.  These names must match
+    as a whole, in any case, so that an added column such as
+    GSD_areaEquivalent_uncertainty is not taken for them.  Only without
+    them is any other column whose name contains GSD (GSD_m, for example)
+    used, with the definition None, which the file does not state.
+    (None, None) without a GSD column."""
+    for recognisedName, definition in _RECOGNISED_GSD_COLUMNS:
+        for columnName in columnNames:
+            if columnName.strip().lower() == recognisedName:
+                return columnName, definition
     return AutodetectColumn(columnNames, ["gsd"]), None
 
 
@@ -1481,10 +1490,10 @@ class PerImageView(QtWidgets.QWidget):
             excludedSubstrings=("gsd",))
 
     def _ColumnIsNumeric(self, name):
-        for row in self.rows[:25]:
-            if isinstance(row.get(name), float):
-                return True
-        return False
+        """True when the column *name* holds a number in any row of the
+        file, so that a column whose first rows are empty, as they can be
+        in a file of another program, is still offered."""
+        return any(isinstance(row.get(name), float) for row in self.rows)
 
     def _SelectColumnInComboBox(self, comboBox, columnName):
         if columnName is None:
@@ -1680,7 +1689,7 @@ class OverviewView(QtWidgets.QWidget):
 
 _ABOUT_HTML = """
 <h2>GSD Visualiser</h2>
-<p><b>Version:</b> 1.0.0 (2026-11-18)<br>
+<p><b>Version:</b> 1.0.1 (2026-11-22)<br>
 <b>Author:</b> Geert J. Verhoeven
 (ORCID: <a href="https://orcid.org/0000-0003-4825-9604">
 0000-0003-4825-9604</a>)<br>
@@ -1788,10 +1797,11 @@ decimals</b>.</p>
 
 <h3>A note on workbooks</h3>
 <p>The GSD Value Exporter writes plain CSVs (one per image)
-rather than a multi-sheet spreadsheet, because Metashape&rsquo;s
-bundled Python does not include a spreadsheet-writing library and
-CSV is the most portable format.  This visualiser is the intended
-way to bring those per-image files back together.</p>
+rather than a multi-sheet spreadsheet for two reasons. Metashape runs
+scripts with its own Python installation, which does not include a
+spreadsheet-writing library, and CSV is the most portable format.
+This visualiser is the intended way to bring those per-image files
+back together.</p>
 
 <h3>Input columns</h3>
 <p>The input columns are PixelColumn, PixelRow, CRS_X, CRS_Y, CRS_Z, SlantDistance, CosineIncidence,
@@ -1802,7 +1812,7 @@ are detected automatically by name. If a file differs, the heat map drop-downs a
 the colour column to be chosen by hand. The GSD column of the statistics, the histograms, and the
 overview is always detected automatically, in the order given above.</p>
 <p>The delimiter (a comma, a semicolon, or a tab) is detected from the header row, so that the files
-of all three choices of <i>Delimiter and decimal separator</i> of the GSD Value Exporter are read.
+of all three choices of ‘Delimiter and decimal separator’ of the GSD Value Exporter are read.
 In a file with a semicolon or a tab as delimiter, a number with a decimal comma (1,25 or 2,5e-09) is
 read as well as one with a decimal point.</p>
 """

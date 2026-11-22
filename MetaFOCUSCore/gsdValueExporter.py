@@ -39,12 +39,12 @@ Exporter, so the three tools give identical statistics for the same
 image, surface mode, and pixel step.
 
 Author:      Geert J. Verhoeven (ORCID: 0000-0003-4825-9604)
-Version:     1.0.0 (2026-11-18)
+Version:     1.0.1 (2026-11-22)
 Date:        2026-06-12
 Licence:     GPL-3.0-or-later WITH GPL-3.0-linking-exception
 Contact:     geert.verhoeven@univie.ac.at
 Requires:    Agisoft Metashape Professional 2.x+
-Developed for: Agisoft Metashape Professional 2.3.2 (tested offline, see README.md)
+Developed for: Agisoft Metashape Professional 2.3.2
 
 Dependencies:
     - photogrammetryUtilities.py (must be in the same directory).
@@ -99,7 +99,7 @@ from . import _METAFOCUS_VERSION
 from .photogrammetryUtilities import (
     ReportSuppressedError, INSPECTION_MARKER_GROUP_LABEL, INSPECTION_MARKER_META_KEY,
     RollingShutterConsoleLines, RollingShutterModelName, RollingShutterRayText,
-    FormatCountWithNoun, JoinWithAnd, NormalisedProjectPath, IsInspectionMarker,
+    FormatCountWithNoun, JoinWithAnd, NormalisedProjectPath, IsReplaceableInspectionMarker,
     DescribeException,
     IsMasterImage,
     ConvertToCamelCase,
@@ -115,6 +115,7 @@ from .photogrammetryUtilities import (
     ConsoleBlockEnd, ConsoleBlockStartOfChunk, PrintConsoleLines,
     SelectedMasterImages, SelectedImagesStatusText, SelectedImagesConsoleLines, NoSelectedImageText,
     SelectedImageKeys, ConsolePath, CrsUnitNames,
+    DeclinedReplacingText, ReplaceUnconfirmedFileQuestionText, ReplacesUnconfirmedFile,
 )
 
 # Label of the marker group that holds the MaxGSD and MinGSD markers.
@@ -818,17 +819,34 @@ def _CreateGsdMarker(chunk, markerLabel, record, createdMarkerLabels=None):
     the other MetaFOCUS tools), and it is kept in the marker group
     "GSD extremes".  The record holds the point in the chunk CRS, and
     the reference location is written in the marker CRS of the
-    Reference Settings when the chunk has a separate one (MarkerReferenceLocationFromChunkCoordinates).  Earlier
-    inspection markers with the same label (IsInspectionMarker) are
-    removed once the new marker is in place.  Any other marker with that
-    label, for example a control point that someone named so, is kept as
-    it is, and the Console says so (KeptMarkersConsoleLine).  The label is
-    added to the list *createdMarkerLabels*, when one is given, as soon as
-    the marker exists: a replaced marker leaves the number of markers
+    Reference Settings when the chunk has a separate one
+    (MarkerReferenceLocationFromChunkCoordinates).  When it cannot be
+    written there, no marker is created, any marker with the label stays
+    as it is, the Console says so, and None is returned.  The same holds
+    when the metadata record of the new marker cannot be written: the new
+    marker is removed again, as without its record it would not be an
+    inspection marker that a later export replaces.  Earlier
+    inspection markers with the same label that carry the metadata record
+    of the tool and have no marker projection and no enabled reference
+    location (IsReplaceableInspectionMarker) are removed once the new
+    marker is in place.  Any other marker with that label, for example a
+    control point that someone named so and moved into the group, is kept
+    as it is, and the Console says so (KeptMarkersConsoleLine).  The label
+    is added to the list *createdMarkerLabels*, when one is given, as soon
+    as the marker exists: a replaced marker leaves the number of markers
     unchanged, yet adding it clears the selection of images all the
     same."""
+    crsPoint = Metashape.Vector([
+        record["crsX"], record["crsY"], record["crsZ"]])
+    try:
+        referenceLocation = MarkerReferenceLocationFromChunkCoordinates(chunk, crsPoint)
+    except ValueError as conversionError:
+        print("  The inspection marker ‘{}’ was not created, because its location cannot be written in the "
+              "marker CRS: {}. Any earlier marker with this label is kept.".format(
+                  markerLabel, DescribeException(conversionError)))
+        return None
     sameLabelMarkers = [marker for marker in chunk.markers if marker.label == markerLabel]
-    staleMarkers = [marker for marker in sameLabelMarkers if IsInspectionMarker(marker)]
+    staleMarkers = [marker for marker in sameLabelMarkers if IsReplaceableInspectionMarker(marker)]
     keptMarkerCount = len(sameLabelMarkers) - len(staleMarkers)
     if keptMarkerCount:
         print("  " + KeptMarkersConsoleLine(markerLabel, keptMarkerCount))
@@ -838,21 +856,20 @@ def _CreateGsdMarker(chunk, markerLabel, record, createdMarkerLabels=None):
     if createdMarkerLabels is not None:
         createdMarkerLabels.append(markerLabel)
     marker.label = markerLabel
-
-    crsPoint = Metashape.Vector([
-        record["crsX"], record["crsY"], record["crsZ"]])
-
-    try:
-        marker.reference.location = MarkerReferenceLocationFromChunkCoordinates(chunk, crsPoint)
-    except ValueError as conversionError:
-        print("  The reference location of {} was not set: {}.".format(markerLabel, DescribeException(conversionError)))
+    marker.reference.location = referenceLocation
     marker.reference.enabled = False
     # The provenance of the marker in its metadata, so that a renamed or
     # moved marker stays an inspection marker.
     try:
         marker.meta[INSPECTION_MARKER_META_KEY] = INSPECTION_MARKER_META_VALUE
-    except Exception as suppressedError:
-        ReportSuppressedError("gsdValueExporter._CreateGsdMarker.meta", suppressedError)
+    except Exception as metaError:
+        try:
+            chunk.remove([marker])
+        except Exception as suppressedError:
+            ReportSuppressedError("gsdValueExporter._CreateGsdMarker.remove", suppressedError)
+        print("  The inspection marker ‘{}’ was not created, because its metadata record cannot be written: {}. "
+              "Any earlier marker with this label is kept.".format(markerLabel, DescribeException(metaError)))
+        return None
     if markerGroup is not None:
         try:
             marker.group = markerGroup
@@ -865,13 +882,15 @@ def _CreateGsdMarker(chunk, markerLabel, record, createdMarkerLabels=None):
 
 def KeptMarkersConsoleLine(markerLabel, keptMarkerCount):
     """The Console line when *keptMarkerCount* markers labelled
-    *markerLabel* are not inspection markers, so that a new inspection
-    marker leaves them as they are (_CreateGsdMarker)."""
+    *markerLabel* are not inspection markers that an export may replace
+    (IsReplaceableInspectionMarker), so that a new inspection marker
+    leaves them as they are (_CreateGsdMarker)."""
+    reason = ("because an export replaces only inspection markers that MetaFOCUS recorded as its own and that have "
+              "no marker projection and no enabled reference location. The new inspection marker gets the same "
+              "label.")
     if keptMarkerCount == 1:
-        return ("The marker \u2018{}\u2019 is not an inspection marker, so it is kept, and the new inspection "
-                "marker gets the same label.".format(markerLabel))
-    return ("{:,} markers labelled \u2018{}\u2019 are not inspection markers, so they are kept, and the new "
-            "inspection marker gets the same label.".format(keptMarkerCount, markerLabel))
+        return "The marker \u2018{}\u2019 is kept, {}".format(markerLabel, reason)
+    return "{:,} markers labelled \u2018{}\u2019 are kept, {}".format(keptMarkerCount, markerLabel, reason)
 
 
 def CreateMaximumGsdMarker(chunk, cameraLabel, maximumGsdRecord, coordinateKind="unknown", lengthUnit="m",
@@ -880,9 +899,11 @@ def CreateMaximumGsdMarker(chunk, cameraLabel, maximumGsdRecord, coordinateKind=
     largest area-equivalent GSD (see _CreateGsdMarker, which adds its
     label to *createdMarkerLabels*) and report it in the Console, in
     *lengthUnit* ("m", or "chunk units" in a chunk without a physical
-    scale)."""
+    scale).  Returns the marker, or None when it was not created."""
     markerLabel = "MaxGSD_{}".format(cameraLabel)
     marker = _CreateGsdMarker(chunk, markerLabel, maximumGsdRecord, createdMarkerLabels)
+    if marker is None:
+        return None
     thetaDegrees = math.degrees(
         math.acos(min(1.0, maximumGsdRecord["cosineIncidence"])))
     print("  Created inspection marker '{}' at CRS {}".format(
@@ -901,9 +922,11 @@ def CreateMinimumGsdMarker(chunk, cameraLabel, minimumGsdRecord, coordinateKind=
     smallest area-equivalent GSD (see _CreateGsdMarker, which adds its
     label to *createdMarkerLabels*) and report it in the Console, in
     *lengthUnit* ("m", or "chunk units" in a chunk without a physical
-    scale)."""
+    scale).  Returns the marker, or None when it was not created."""
     markerLabel = "MinGSD_{}".format(cameraLabel)
     marker = _CreateGsdMarker(chunk, markerLabel, minimumGsdRecord, createdMarkerLabels)
+    if marker is None:
+        return None
     thetaDegrees = math.degrees(
         math.acos(min(1.0, minimumGsdRecord["cosineIncidence"])))
     print("  Created inspection marker '{}' at CRS {}".format(
@@ -1252,7 +1275,7 @@ def ProcessOneCamera(camera, chunk, chunkScale, useMesh, useDem,
 
 _GSD_EXPORT_ABOUT_HTML = """
 <h2>GSD Value Exporter</h2>
-<p>Version 1.0.0 (2026-11-18)</p>
+<p>Version 1.0.1 (2026-11-22)</p>
 <p><b>Author:</b> Geert J. Verhoeven (ORCID: <a href="https://orcid.org/0000-0003-4825-9604">0000-0003-4825-9604</a>)<br>
 <b>Contact:</b> <a href="mailto:geert.verhoeven@univie.ac.at">geert.verhoeven@univie.ac.at</a><br>
 <b>Licence:</b> GNU General Public License, version 3 or any later version (GPL-3.0-or-later),
@@ -1487,7 +1510,7 @@ heights get more decimals where theirs do not resolve a tenth of the
 smallest GSD of the image in the CSV, or the GSD at the location in the
 Console.  The decimals set the step of the output, not the uncertainty
 of the coordinates.</p>
-<p>The option <i>Delimiter and decimal separator</i> chooses a comma with
+<p>The option ‘Delimiter and decimal separator’ chooses a comma with
 a decimal point (1.25), a semicolon with a decimal comma (1,25), or a tab
 with a decimal point.  The semicolon with the decimal comma suits Excel
 with regional settings that use the decimal comma, for example German
@@ -1533,13 +1556,16 @@ the Model view. They are inspection markers, not check points: their coordinates
 surface model, not from an independent measurement. Their reference location is set but disabled, so
 they never act as control points, either in Metashape&rsquo;s bundle adjustment or in the counts of
 the other MetaFOCUS tools. They are created without image measurements, so they have no position
-estimated from the images. Each also carries its provenance in its metadata
+estimated from the images. When the location of a marker cannot be written in the separate CRS for
+markers of the Reference Settings, for example because one of the two CRSs is local, the marker is
+not created, and the Console says so. Each also carries its provenance in its metadata
 (MetaFOCUS/InspectionMarker), so that it stays an inspection marker when it is renamed or moved. The
 check-point root mean square error (RMSE) of the Gradual Selection Filter and the tables of the
 Marker Residual Inspector therefore leave it out, also when someone measures it in images. They are
 kept in the marker group &lsquo;GSD extremes&rsquo;, so that they can be hidden or removed together.
-A new export replaces the inspection markers with the same label. A marker with that label that is
-not an inspection marker, such as a control point, is kept as it is, and the Console says so.</p>
+A new export replaces the inspection markers with the same label that carry this provenance and have
+no marker projection and no enabled reference location. Any other marker with that label, such as a
+control point, is kept as it is, and the Console says so.</p>
 <p>Adding markers clears the selection of images that Metashape reports, although the Photos pane
 may still highlight them. Metashape clears it again after the export, so the tool cannot select the
 images again. After an export that adds markers, also when they replace the markers of an earlier
@@ -1753,9 +1779,10 @@ class GsdValueExporterDialog(QtWidgets.QDialog):
             "MaxGSD_<label> and MinGSD_<label>. Their reference location is set\n"
             "but disabled, so they never act as control points, and they have no\n"
             "image measurements, so they are no check points either.\n"
-            "Existing inspection markers with the same label are replaced, and\n"
-            "other markers with that label are kept. No markers are\n"
-            "created when the chunk has no transform.")
+            "Inspection markers of earlier exports with the same label are\n"
+            "replaced, unless they have marker projections or an enabled\n"
+            "reference location. Other markers with that label are kept.\n"
+            "No markers are created when the chunk has no transform.")
         optionsLayout.addWidget(self.checkBoxCreateMarkers)
 
         mainLayout.addWidget(optionsGroup)
@@ -1933,8 +1960,17 @@ class GsdValueExporterDialog(QtWidgets.QDialog):
                 filter="CSV (*.csv)")
             if not outputPath:
                 return
+            chosenPath = outputPath
             if not outputPath.lower().endswith(".csv"):
                 outputPath += ".csv"
+            # A file at the path with the added extension, which the save
+            # dialog did not ask about, is replaced only after a question.
+            if ReplacesUnconfirmedFile(chosenPath, outputPath) and QtWidgets.QMessageBox.question(
+                    self, "GSD Value Exporter", ReplaceUnconfirmedFileQuestionText(outputPath),
+                    QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+                    QtWidgets.QMessageBox.No) != QtWidgets.QMessageBox.Yes:
+                print("GSD Value Exporter: " + DeclinedReplacingText(outputPath))
+                return
             outputDirectory = os.path.dirname(outputPath)
             # A single image is written to the path the user chose.
             outputFilePathByKey = {cameras[0].key: outputPath}

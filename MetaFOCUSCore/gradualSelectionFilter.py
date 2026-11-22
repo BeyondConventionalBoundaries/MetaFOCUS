@@ -43,10 +43,10 @@ Author:     Geert J. Verhoeven (ORCID: 0000-0003-4825-9604)
             Based on an original script by Martin Wieser
             (ORCID: 0009-0005-9870-6494).
 Contact:    geert.verhoeven@univie.ac.at
-Version:    1.0.0 (2026-11-18)
+Version:    1.0.1 (2026-11-22)
 Licence:    GPL-3.0-or-later WITH GPL-3.0-linking-exception
 Requires:   Agisoft Metashape Professional 2.x
-Developed for: Agisoft Metashape Professional 2.3.2 (tested offline, see README.md)
+Developed for: Agisoft Metashape Professional 2.3.2
 """
 
 import array
@@ -151,12 +151,12 @@ CRITERION_TOOLTIPS = {
 # (DisabledOrientedImagesText): for one image and for more.
 DISABLED_IMAGE_METRICS_TEXT = (
     "Optimize Cameras, which each iteration runs, still adjusts such an image, but the RMS reprojection error, the "
-    "redundancy, and \u03c3\u2080 of the filter count the enabled images only. Enabling the image, or resetting its "
-    "orientation, makes them match the adjustment.")
+    "redundancy, and the approximate \u03c3\u2080 of the filter count the enabled images only. Enabling the image, "
+    "or resetting its orientation, removes this difference.")
 DISABLED_IMAGES_METRICS_TEXT = (
     "Optimize Cameras, which each iteration runs, still adjusts such images, but the RMS reprojection error, the "
-    "redundancy, and \u03c3\u2080 of the filter count the enabled images only. Enabling these images, or resetting "
-    "their orientation, makes these values match the adjustment.")
+    "redundancy, and the approximate \u03c3\u2080 of the filter count the enabled images only. Enabling these "
+    "images, or resetting their orientation, removes this difference.")
 
 RMS_STOP_TOOLTIP = (
     "An additional stopping condition on the overall RMS\n"
@@ -1355,7 +1355,8 @@ def _ComputeMarkerReferenceErrors(chunk, useControlPoints, contextLabel):
     count = 0
     pointErrors = {}
     for markerIndex, marker in enumerate(chunk.markers):
-        # An inspection marker has model-derived reference coordinates, so
+        # An inspection marker, which the GSD Value Exporter recorded as its
+        # own in its metadata, has model-derived reference coordinates, so
         # it is neither a control nor a check point.
         if IsInspectionMarker(marker):
             continue
@@ -1986,29 +1987,62 @@ def CountSignAssignmentsUpTo(doubledRanks, doubledLimit):
 # test of the suggestion counts exactly (WilcoxonSignedRankLowerP).  The
 # count takes a time of about n^3 for each state compared: 0.04 s for 100
 # differences, 0.26 s for 200, and 2.9 s for 400 in Python 3.13.  Above it,
-# the normal approximation with the correction for ties is close to the
-# exact value.
+# the test takes the normal approximation with the correction for ties.
+# Its relative error grows in the far tail: for 101 differences that are
+# all negative and different, it gives 1.3e-18, and the exact count
+# 3.9e-31.
 EXACT_WILCOXON_MAXIMUM_COUNT = 100
 
 
-def WilcoxonNormalApproximationLowerP(doubledRanks, doubledPositiveRankSum):
-    """The lower tail of the sum of the positive ranks, W+, by the normal
-    approximation with the correction for ties, without a continuity
-    correction (as SciPy's method "approx"): the mean of W+ is n(n + 1)/4,
-    and its variance n(n + 1)(2n + 1)/24 minus the sum of t^3 - t over the
-    groups of t tied ranks, divided by 48.  *doubledRanks* are the doubled
-    ranks of the n differences (DoubledAverageRanks), and
-    *doubledPositiveRankSum* twice W+.  Tied absolute values share a
-    doubled rank, and different values never do, so the groups of equal
-    doubled ranks are the groups of ties."""
+def WilcoxonStandardScore(doubledRanks, doubledPositiveRankSum):
+    """The standard score of the sum of the positive ranks, W+, with the
+    correction for ties: the mean of W+ is n(n + 1)/4, and its variance
+    n(n + 1)(2n + 1)/24 minus the sum of t^3 - t over the groups of t tied
+    ranks, divided by 48.  *doubledRanks* are the doubled ranks of the n
+    differences (DoubledAverageRanks), and *doubledPositiveRankSum* twice
+    W+.  Tied absolute values share a doubled rank, and different values
+    never do, so the groups of equal doubled ranks are the groups of
+    ties."""
     count = len(doubledRanks)
     groupSizes = {}
     for doubledRank in doubledRanks:
         groupSizes[doubledRank] = groupSizes.get(doubledRank, 0) + 1
     tieCorrection = sum(size ** 3 - size for size in groupSizes.values()) / 48.0
     variance = count * (count + 1) * (2 * count + 1) / 24.0 - tieCorrection
-    standardScore = (doubledPositiveRankSum / 2.0 - count * (count + 1) / 4.0) / math.sqrt(variance)
+    return (doubledPositiveRankSum / 2.0 - count * (count + 1) / 4.0) / math.sqrt(variance)
+
+
+def WilcoxonNormalApproximationLowerP(doubledRanks, doubledPositiveRankSum):
+    """The lower tail of the sum of the positive ranks, W+, by the normal
+    approximation of its standard score (WilcoxonStandardScore), without
+    a continuity correction (as SciPy's method "approx")."""
+    standardScore = WilcoxonStandardScore(doubledRanks, doubledPositiveRankSum)
     return 0.5 * math.erfc(-standardScore / math.sqrt(2.0))
+
+
+def UsedWilcoxonDifferences(differences):
+    """(the differences that the Wilcoxon signed-rank test uses, their
+    doubled ranks, twice the sum of the positive ranks W+): following
+    Wilcoxon, a difference of zero is left out, and so is a value that is
+    not a finite number, and the absolute values of the others are ranked
+    (DoubledAverageRanks)."""
+    usedDifferences = [value for value in differences if _IsFinite(value) and value != 0.0]
+    doubledRanks = DoubledAverageRanks([abs(value) for value in usedDifferences])
+    doubledPositiveRankSum = sum(doubledRank for doubledRank, value in zip(doubledRanks, usedDifferences)
+                                 if value > 0.0)
+    return usedDifferences, doubledRanks, doubledPositiveRankSum
+
+
+def WilcoxonNormalScore(differences):
+    """The standard score of W+ of *differences* (WilcoxonStandardScore)
+    when the test takes the normal approximation for them
+    (IsWilcoxonPValueExact), otherwise None.  It orders p-values that the
+    approximation gives as equal, as two that are zero in floating-point
+    arithmetic (IsSmallerPValue)."""
+    usedDifferences, doubledRanks, doubledPositiveRankSum = UsedWilcoxonDifferences(differences)
+    if not usedDifferences or IsWilcoxonPValueExact(len(usedDifferences)):
+        return None
+    return WilcoxonStandardScore(doubledRanks, doubledPositiveRankSum)
 
 
 def IsWilcoxonPValueExact(usedCount):
@@ -2043,13 +2077,10 @@ def WilcoxonSignedRankLowerP(differences):
     approximation (IsWilcoxonPValueExact).
 
     Returns (p, n, W+): (1.0, 0, 0.0) without a difference to use."""
-    usedDifferences = [value for value in differences if _IsFinite(value) and value != 0.0]
+    usedDifferences, doubledRanks, doubledPositiveRankSum = UsedWilcoxonDifferences(differences)
     usedCount = len(usedDifferences)
     if usedCount == 0:
         return 1.0, 0, 0.0
-    doubledRanks = DoubledAverageRanks([abs(value) for value in usedDifferences])
-    doubledPositiveRankSum = sum(doubledRank for doubledRank, value in zip(doubledRanks, usedDifferences)
-                                 if value > 0.0)
     if not IsWilcoxonPValueExact(usedCount):
         return (WilcoxonNormalApproximationLowerP(doubledRanks, doubledPositiveRankSum), usedCount,
                 doubledPositiveRankSum / 2.0)
@@ -2072,20 +2103,51 @@ def CanShowSignificance(usedCount):
     return usedCount > 0 and 0.5 ** usedCount <= SIGNIFICANCE_LEVEL
 
 
+# Below this value the suggestion gives a p-value as less than 1e-300, as
+# the Interior Orientation Viewer does.  Floating-point numbers lose digits
+# below about 2.2e-308 and become zero below about 4.9e-324.  When all
+# check points have smaller errors, the normal approximation
+# (WilcoxonNormalApproximationLowerP) falls below 1e-300 from 1,373 check
+# points when all the differences have the same absolute value, and from
+# 1,830 when no two of them are equal (one pair of equal values gives the
+# same).  It is zero from 1,481 check points and from 1,974.  Such
+# p-values are ordered by their standard scores (IsSmallerPValue).
+SMALLEST_SHOWN_P_VALUE = 1e-300
+
+
 def FormatPValue(pValue):
-    """A p-value with two significant digits ("0.0024", "0.50", "1.0")."""
+    """A p-value with two significant digits ("0.0024", "0.50", "1.0"), or
+    "less than 1e-300" below SMALLEST_SHOWN_P_VALUE."""
+    if pValue < SMALLEST_SHOWN_P_VALUE:
+        return "less than {:g}".format(SMALLEST_SHOWN_P_VALUE)
     return "{:#.2g}".format(pValue)
+
+
+def NormalApproximationText(comparison):
+    """" by the normal approximation" when the test did not count the
+    p-value of *comparison* (CompareWithDefaultState) exactly
+    (IsWilcoxonPValueExact), and an empty text when it did."""
+    if IsWilcoxonPValueExact(comparison["usedCount"]):
+        return ""
+    return " by the normal approximation"
 
 
 def PValueText(comparison):
     """The p-value of *comparison* (CompareWithDefaultState) with two
     significant digits (FormatPValue), followed by "by the normal
     approximation" when the test did not count it exactly
-    (IsWilcoxonPValueExact)."""
-    pValueText = FormatPValue(comparison["pValue"])
-    if not IsWilcoxonPValueExact(comparison["usedCount"]):
-        pValueText += " by the normal approximation"
-    return pValueText
+    (NormalApproximationText)."""
+    return FormatPValue(comparison["pValue"]) + NormalApproximationText(comparison)
+
+
+def PValueRelationText(comparison):
+    """"p = " and the p-value of *comparison* (PValueText), or "p < 1e-300"
+    below SMALLEST_SHOWN_P_VALUE, followed by "by the normal
+    approximation" when the test did not count it exactly
+    (NormalApproximationText)."""
+    if comparison["pValue"] < SMALLEST_SHOWN_P_VALUE:
+        return "p < {:g}".format(SMALLEST_SHOWN_P_VALUE) + NormalApproximationText(comparison)
+    return "p = " + PValueText(comparison)
 
 
 def SignificanceLevelText():
@@ -2190,6 +2252,7 @@ def CompareWithDefaultState(row, defaultRow, rmseKey, errorsKey):
     defaultPointErrors = defaultRow.get(errorsKey) or {}
     differences, pointsWithoutAPrioriCount = PairedSquaredErrorDifferences(statePointErrors, defaultPointErrors)
     pValue, usedCount, _ = WilcoxonSignedRankLowerP(differences)
+    standardScore = WilcoxonNormalScore(differences)
     sharedKeys = [key for key in defaultPointErrors if key in statePointErrors]
     if len(sharedKeys) == len(statePointErrors) == len(defaultPointErrors):
         comparedRmse, comparedDefaultRmse = row[rmseKey], defaultRow[rmseKey]
@@ -2204,8 +2267,20 @@ def CompareWithDefaultState(row, defaultRow, rmseKey, errorsKey):
             "comparedRmse": comparedRmse, "comparedDefaultRmse": comparedDefaultRmse, "rankingRmse": rankingRmse,
             "lackedCount": sum(1 for key in defaultPointErrors if key not in statePointErrors),
             "pointCount": len(statePointErrors), "defaultPointCount": len(defaultPointErrors),
-            "pointsWithoutAPrioriCount": pointsWithoutAPrioriCount,
+            "pointsWithoutAPrioriCount": pointsWithoutAPrioriCount, "standardScore": standardScore,
             "isSignificantlyBetter": isLower and usedCount > 0 and pValue <= SIGNIFICANCE_LEVEL}
+
+
+def IsSmallerPValue(comparison, otherComparison):
+    """True when the p-value of *comparison* is smaller than that of
+    *otherComparison* (CompareWithDefaultState).  Two equal p-values of the
+    normal approximation, such as two that are zero in floating-point
+    arithmetic, are ordered by their standard scores (WilcoxonNormalScore):
+    the lower tail is smaller for the smaller score."""
+    if comparison["pValue"] != otherComparison["pValue"]:
+        return comparison["pValue"] < otherComparison["pValue"]
+    standardScore, otherStandardScore = comparison["standardScore"], otherComparison["standardScore"]
+    return standardScore is not None and otherStandardScore is not None and standardScore < otherStandardScore
 
 
 def HoldsTheDefaultPoints(comparison):
@@ -2299,7 +2374,7 @@ def NoBetterStateTexts(comparisons, defaultRow, rmseKey, measureName, pointNouns
         return ["No other state shares a {} with {}".format(pointNouns[0], defaultName)], None
     smallestComparison = testedComparisons[0]
     for comparison in testedComparisons[1:]:
-        if comparison["pValue"] < smallestComparison["pValue"]:
+        if IsSmallerPValue(comparison, smallestComparison):
             smallestComparison = comparison
     largestUsedCount = max(comparison["usedCount"] for comparison in testedComparisons)
     if not CanShowSignificance(largestUsedCount):
@@ -2464,9 +2539,9 @@ def ReferencePointSuggestion(summaryRows, isCheckPoints, missingCheckPointText=N
                 FormatCountWithNoun(lackedCount, *pointNouns), "its" if lackedCount == 1 else "their", defaultName)
         sentences = ["lowest {} ({}) of the states that are significantly better than {}".format(
                          measureText, valueText, defaultName),
-                     "A one-sided Wilcoxon signed-rank test on {} gives p = {}, {}".format(
+                     "A one-sided Wilcoxon signed-rank test on {} gives {}, {}".format(
                          FormatCountWithNoun(bestComparison["usedCount"], *pointNouns),
-                         PValueText(bestComparison), PValueAgainstLevelText(bestComparison["pValue"]))]
+                         PValueRelationText(bestComparison), PValueAgainstLevelText(bestComparison["pValue"]))]
         if lowerStateText:
             sentences.append(lowerStateText)
         testedComparison = bestComparison
@@ -2790,7 +2865,7 @@ class LineChartWidget(QtWidgets.QWidget):
 
 _ABOUT_HTML = """
 <h2>Gradual Selection Filter</h2>
-<p><b>Version:</b> 1.0.0 (2026-11-18)<br>
+<p><b>Version:</b> 1.0.1 (2026-11-22)<br>
 <b>Author:</b> Geert J. Verhoeven
 (ORCID: <a href="https://orcid.org/0000-0003-4825-9604">
 0000-0003-4825-9604</a>)<br>
@@ -2816,10 +2891,12 @@ it as <i>Gradual Selection</i>. The four criteria below are the criteria of this
 projections. In a check in Metashape 2.3.2, <i>Optimize Cameras</i> adjusted such an image with the
 others, also with its reference location disabled. Its 2D tie points entered the reprojection error
 of the processing report, and its marker projections alone also changed the adjustment. Each
-iteration runs <i>Optimize Cameras</i>, which adjusts such an image as well, but the RMS reprojection
-error, the redundancy, and &sigma;&#8320; of the filter count the enabled images only. The question
-before the run names these images. Enabling them, or resetting their orientation, before the run makes
-these values match the adjustment.</p>
+iteration runs <i>Optimize Cameras</i>, which adjusts such an image as well, but the root mean square
+(RMS) reprojection error, the redundancy, and the approximate &sigma;&#8320; of the filter count the
+enabled images only.
+The question before the run names these images. Enabling them, or resetting their orientation, before
+the run removes this difference. The redundancy and &sigma;&#8320; remain the approximations described
+below.</p>
 
 <h3>Keypoint size</h3>
 <p>Two of the criteria below use the keypoint size. Metashape detects keypoints in an image pyramid,
@@ -2856,7 +2933,7 @@ A residual belongs to a 2D tie point, but the criterion gives one value per 3D t
 gradual selection removes 3D tie points. For each 2D tie point of a 3D tie point, Metashape divides
 the length of its residual by its keypoint size, both in pixels. The largest of these quotients is
 the value of the 3D tie point (Metashape manual). The value therefore has no unit, and it is a
-maximum, not a root mean square (RMS). With a target of 0.3, the filter removes every 3D tie point
+maximum, not a root mean square. With a target of 0.3, the filter removes every 3D tie point
 that has a 2D tie point whose residual exceeds 0.3 times its keypoint size. For a keypoint size of
 2 pixels, that is a residual above 0.6 pixels, and for 8 pixels a residual above 2.4 pixels. All
 2D tie points of a removed 3D tie point go with it, also those with small residuals. As a maximum,
@@ -2882,7 +2959,7 @@ value <i>N</i>&minus;1.</li>
 <h3>Reprojection errors in Metashape and in MetaFOCUS</h3>
 <p>Metashape and MetaFOCUS report several reprojection errors. They differ in what they cover (one
 3D tie point, one image, one marker, or the whole chunk), in how they combine the residuals, as a
-maximum or as a root mean square (RMS), and in their unit. A value in keypoint size units divides each
+maximum or as a root mean square, and in their unit. A value in keypoint size units divides each
 residual by the keypoint size of its 2D tie point and has no unit, whereas a value in pixels does
 not divide it. The Metashape manual says that the chunk information and the processing report give
 two reprojection errors: one in keypoint size units, which the bundle adjustment minimises, and one
@@ -3055,8 +3132,9 @@ largest movement of an image and of a marker since the previous iteration (for i
 the chunk as found). When measured markers have a reference location, it records the control-point
 root mean square error (RMSE) and the check-point RMSE as well. Control points are markers with a
 ticked reference, whereas check points are markers with a reference location and an unticked
-reference. A marker counts only when Metashape has estimated its position. The inspection markers of
-the GSD Value Exporter, whose reference coordinates come from the surface model, count as neither.
+reference. A marker counts only when Metashape has estimated its position. The inspection markers that
+the GSD Value Exporter recorded as its own in their metadata, whose reference coordinates come from the
+surface model, count as neither.
 Both RMSE values are the root mean square of the 3D distances between the estimated and the
 reference positions. They are evaluated in a local east-north-up coordinate reference system (CRS),
 so they are metric for both projected and geographic CRSs.</p>
@@ -3264,8 +3342,9 @@ the a priori standard deviations that Metashape&rsquo;s &lsquo;Accuracy&rsquo; f
 check point has no positive a priori standard deviation, the differences are not divided, and the
 suggestion says so. Differences of zero are left out, and tied differences get their average rank.
 Up to 100 differences, the p-value is exact. Above that, it comes from the normal approximation with
-the correction for ties, and the suggestion says so. With fewer than five check points, no p-value
-can be below 5&nbsp;%, and the suggestion says so.</p>
+the correction for ties, and the suggestion says so. A p-value below 10<sup>&minus;300</sup> is given as
+less than 1e-300. With fewer than five check points, no p-value can be below 5&nbsp;%, and the
+suggestion says so.</p>
 <p>Each state is compared with the default on its own, without a correction for the number of states
 compared. Choosing a state in this way uses the check points, so for the suggested iteration they
 are no longer an independent check (see above), and the suggestion says so. The RMSE also weights

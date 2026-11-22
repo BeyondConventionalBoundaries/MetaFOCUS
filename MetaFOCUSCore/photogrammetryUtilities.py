@@ -9,12 +9,12 @@ Orientation Viewer and the Gradual Selection Filter, and every module
 reports tolerated errors through ReportSuppressedError.
 
 Author:      Geert J. Verhoeven (ORCID: 0000-0003-4825-9604)
-Version:     1.0.0 (2026-11-18)
+Version:     1.0.1 (2026-11-22)
 Date:        2026-06-12
 Licence:     GPL-3.0-or-later WITH GPL-3.0-linking-exception
 Contact:     geert.verhoeven@univie.ac.at
 Requires:    Agisoft Metashape Professional 2.x+
-Developed for: Agisoft Metashape Professional 2.3.2 (tested offline, see README.md)
+Developed for: Agisoft Metashape Professional 2.3.2
              PySide2 (bundled with Metashape)
 
 Contents:
@@ -53,8 +53,8 @@ Contents:
       blocks that the tools print to the Console pane, and
       ReportSuppressedError
     - The delimiter and the decimal separator of the CSV exports: the
-      one choice of the four exporters and the decimal comma of the
-      numbers of their data rows
+      one choice of the five tools that write CSV files and the decimal
+      comma of the numbers of their data rows
 
 Notes:
     - GSD: the photosite pitch projected onto the surface.  At every
@@ -4631,11 +4631,10 @@ def MarkerReferenceLocationFromChunkCoordinates(chunk, chunkCoordinates):
 # positions for visual inspection, the MaxGSD and MinGSD markers of the GSD
 # Value Exporter.  Their reference coordinates come from the model, so they
 # are neither control points nor check points.  They carry this metadata
-# key, and markers without it are also recognised by their label in the
-# marker group of the GSD Value Exporter.
+# key, which alone makes a marker an inspection marker, and they are kept
+# in this marker group.
 INSPECTION_MARKER_META_KEY = "MetaFOCUS/InspectionMarker"
 INSPECTION_MARKER_GROUP_LABEL = "GSD extremes"
-INSPECTION_MARKER_LABEL_PATTERN = re.compile(r"^(?:MaxGSD|MinGSD)_")
 
 
 def MetadataValue(metadata, key):
@@ -4657,15 +4656,27 @@ def MetadataValue(metadata, key):
 
 def IsInspectionMarker(marker):
     """True for an inspection marker of MetaFOCUS: one with the metadata key
-    INSPECTION_MARKER_META_KEY, or a MaxGSD_ or MinGSD_ marker in the marker
-    group "GSD extremes".  The check-point RMSE of the Gradual Selection Filter and
-    the Marker Residual Inspector leave such markers out, also when someone
-    measured them in images."""
-    if MetadataValue(getattr(marker, "meta", None), INSPECTION_MARKER_META_KEY):
-        return True
-    label = getattr(marker, "label", "") or ""
-    groupLabel = getattr(getattr(marker, "group", None), "label", None)
-    return bool(INSPECTION_MARKER_LABEL_PATTERN.match(str(label))) and groupLabel == INSPECTION_MARKER_GROUP_LABEL
+    INSPECTION_MARKER_META_KEY, which the GSD Value Exporter writes into
+    every inspection marker.  The check-point RMSE of the Gradual Selection
+    Filter and the Marker Residual Inspector leave such markers out, also
+    when someone measured them in images.  A label and a group alone do
+    not make a marker an inspection marker, so that a control point or a
+    check point labelled MaxGSD_ or MinGSD_ in the marker group "GSD
+    extremes" keeps its role."""
+    return bool(MetadataValue(getattr(marker, "meta", None), INSPECTION_MARKER_META_KEY))
+
+
+def IsReplaceableInspectionMarker(marker):
+    """True for an inspection marker that a new export of the GSD Value
+    Exporter may remove: one that carries the metadata key
+    INSPECTION_MARKER_META_KEY, which the tool writes into every
+    inspection marker, and that has neither a marker projection nor an
+    enabled reference location (HasEnabledReferenceLocation).  A marker
+    without this key, or one that has been measured in images or made a
+    control point, is kept."""
+    if not MetadataValue(getattr(marker, "meta", None), INSPECTION_MARKER_META_KEY):
+        return False
+    return not HasEnabledReferenceLocation(marker) and not list(_MarkerProjectionItems(marker))
 
 
 def MarkerReferenceDiscrepancy(chunk, referenceLocation, estimatedWorld):
@@ -4875,21 +4886,6 @@ def DecimalsToResolve(length):
     return max(0, int(math.ceil(-math.log10(length) - 1e-9)))
 
 
-def FormatTransformMatrixForConsole(transformMatrix):
-    """Python expression that recreates *transformMatrix* exactly
-    (every element written with repr), so that a replaced chunk
-    transform can be restored from the Console.  Returns "None" when
-    the chunk had no transform."""
-    if transformMatrix is None:
-        return "None"
-    rowTexts = []
-    for rowIndex in range(4):
-        rowTexts.append("[" + ", ".join(
-            repr(float(transformMatrix[rowIndex, columnIndex]))
-            for columnIndex in range(4)) + "]")
-    return "Metashape.Matrix([" + ", ".join(rowTexts) + "])"
-
-
 def DescribeException(exception):
     """"Type: message" of an exception, or the bare type name when the
     exception carries no message (Python's own MemoryError does not),
@@ -4898,6 +4894,34 @@ def DescribeException(exception):
     if not message:
         return type(exception).__name__
     return "{}: {}".format(type(exception).__name__, message)
+
+
+# ===================================================================
+# A file at the path with the extension that a tool adds
+# ===================================================================
+
+def ReplacesUnconfirmedFile(chosenFilePath, outputFilePath):
+    """True when something exists at *outputFilePath*, the path chosen in
+    a save dialog (*chosenFilePath*) with the extension that the tool added
+    after the dialog.  The dialog asked about the chosen path only, so the
+    tool asks before it replaces that file
+    (ReplaceUnconfirmedFileQuestionText), as the Tie Point Covariance
+    Exporter does (FilesToConfirm)."""
+    return (os.path.normcase(os.path.abspath(outputFilePath)) != os.path.normcase(os.path.abspath(chosenFilePath))
+            and os.path.lexists(outputFilePath))
+
+
+def ReplaceUnconfirmedFileQuestionText(filePath):
+    """The question before a tool replaces *filePath*
+    (ReplacesUnconfirmedFile)."""
+    return ("{} exists already. The save dialog did not ask about it, because {} was added to the chosen name "
+            "after the dialog.\n\nReplace it?".format(filePath, os.path.splitext(filePath)[1]))
+
+
+def DeclinedReplacingText(filePath):
+    """The Console text when replacing *filePath* was declined
+    (ReplaceUnconfirmedFileQuestionText)."""
+    return "nothing was written, because replacing {} was declined.".format(filePath)
 
 
 # ===================================================================
@@ -5185,7 +5209,10 @@ def ExportReferenceData(chunk):
     image: such a name maps to an empty dict (its images get empty
     cells, and no caller falls back to the row of another image), and
     the names are given in the Console.  A row that ends without its
-    trailing empty fields is completed with empty values.
+    trailing empty fields is completed with empty values.  Only the
+    comment lines before the header are skipped: after it, a row whose
+    name begins with # is the row of an image, apart from the row of the
+    total error (#Total error).
 
     Returns None if the export fails (the cause is printed in the
     Console)."""
@@ -5225,17 +5252,24 @@ def ExportReferenceData(chunk):
                     crsName = CrsNameFromWkt(line.split("CoordinateSystem:", 1)[1].strip())
             else:
                 dataLines.append(line)
+        isAfterHeader = False
         for rowData in csv.reader(dataLines):
             if not rowData:
                 continue
 
-            # Skip comment and header lines, and read the units of the
-            # 'Accuracy' values from the header.
-            if rowData[0].lstrip("#").strip() == "Label":
+            # Skip the comment lines and the header before the rows of the
+            # images, and read the units of the 'Accuracy' values from the
+            # header.  After the header, a row whose name begins with # is
+            # the row of an image whose photo has such a name, apart from
+            # the row of the total error that Metashape writes after the
+            # rows of the images (#Total error).
+            if not isAfterHeader and rowData[0].lstrip("#").strip() == "Label":
                 accuracyUnits = ReferenceAccuracyUnits(rowData) or accuracyUnits
+                isAfterHeader = True
                 continue
-            if (rowData[0].startswith("#") or
-                    rowData[0] == "n"):
+            if rowData[0].startswith("#") and (not isAfterHeader or rowData[0][1:].strip() == "Total error"):
+                continue
+            if rowData[0] == "n":
                 continue
 
             # Parse data row, completing the empty trailing fields.
@@ -5260,14 +5294,14 @@ def ExportReferenceData(chunk):
             result[imageLabel] = rows[0]
         if duplicatedLabels:
             print("  [MetaFOCUS] Several images share the {} {} in Metashape's "
-                  "reference export, so their Reference panel values cannot be "
+                  "reference export, so their values of the Reference pane cannot be "
                   "matched to an image and are left empty.".format(
                       "name" if len(duplicatedLabels) == 1 else "names",
                       JoinWithAnd(sorted(duplicatedLabels))))
         return result
 
     except Exception as exception:
-        print("  [MetaFOCUS] The Reference panel values could not be "
+        print("  [MetaFOCUS] The values of the Reference pane could not be "
               "exported: {}".format(DescribeException(exception)))
         return None
 

@@ -7,12 +7,12 @@ one row per master image of the active chunk (no slave images of a
 multi-camera rig and no keyframes of an animation track).
 
 Author:      Geert J. Verhoeven (ORCID: 0000-0003-4825-9604)
-Version:     1.0.0 (2026-11-18)
+Version:     1.0.1 (2026-11-22)
 Date:        2026-06-12
 Licence:     GPL-3.0-or-later WITH GPL-3.0-linking-exception
 Contact:     geert.verhoeven@univie.ac.at
 Requires:    Agisoft Metashape Professional 2.x+
-Developed for: Agisoft Metashape Professional 2.3.2 (tested offline, see README.md)
+Developed for: Agisoft Metashape Professional 2.3.2
              PySide2 (bundled with Metashape)
 
 Usage:
@@ -110,6 +110,7 @@ from .photogrammetryUtilities import (
     CSV_FORMAT_ROW_LABEL_TEXT, CSV_FORMAT_SUITABILITY_TEXT, FillCsvFormatComboBox, ChosenCsvFormat,
     DataRowWithDecimalSeparator,
     ConsoleBlockEnd, ConsoleBlockStart, ConsoleLabelledLine, PrintConsoleLines,
+    DeclinedReplacingText, ReplaceUnconfirmedFileQuestionText, ReplacesUnconfirmedFile,
     CsvFormatName, RollingShutterConsoleLines, ImageRays, ExactRayText,
     FormatLengthForCsv, LengthCsvDecimals,
     )
@@ -308,14 +309,26 @@ _REFERENCE_COMPUTE_FUNCTIONS = {
     "_ComputeTotalErrorDegrees": _ComputeTotalErrorDegrees,
 }
 
-# Column headers of the horizontal reference and estimated coordinates
-# when the CRS of the reference data is geographic: exportReference
-# then writes longitude and latitude in degrees, not metres.
+# Column headers of the horizontal reference and estimated coordinates,
+# with the place of their unit, when the CRS of the reference data is
+# geographic: exportReference then writes longitude and latitude in the
+# angular unit of the CRS (ReferenceCoordinateUnits), not in metres.
 _GEOGRAPHIC_REFERENCE_HEADERS = {
-    "X_reference": "X/Longitude_(deg)",
-    "Y_reference": "Y/Latitude_(deg)",
-    "X_estimated": "X_estimated_(deg)",
-    "Y_estimated": "Y_estimated_(deg)",
+    "X_reference": "X/Longitude_({})",
+    "Y_reference": "Y/Latitude_({})",
+    "X_estimated": "X_estimated_({})",
+    "Y_estimated": "Y_estimated_({})",
+}
+
+# Column headers of the reference coordinates, with the place of their
+# unit, when the CRS of the reference data is geocentric: exportReference
+# then writes geocentric X, Y, and Z, under the headers X, Y, and Z, not
+# eastings, northings, and altitudes (a check in Metashape 2.3.2 with
+# EPSG:4978).
+_GEOCENTRIC_REFERENCE_HEADERS = {
+    "X_reference": "X_({})",
+    "Y_reference": "Y_({})",
+    "Z_reference": "Z_({})",
 }
 
 # Column headers of the reference and estimated coordinates with the
@@ -332,13 +345,15 @@ _REFERENCE_COORDINATE_HEADERS = {
 
 # Symbols of units in the column headers, by the unit names of
 # CrsUnitNames.  Metashape 2.3.2 named the unit of the CRS EPSG:2263, the
-# US survey foot, ft in the headers of the 'Accuracy' values of its export.
-_REFERENCE_UNIT_SYMBOLS = {"metre": "m", "degree": "deg", "foot": "ft", "US survey foot": "ftUS"}
+# US survey foot, ft in the headers of the 'Accuracy' values of its export,
+# and the centimetre of a local CRS cm.
+_REFERENCE_UNIT_SYMBOLS = {"metre": "m", "centimetre": "cm", "degree": "deg", "foot": "ft", "US survey foot": "ftUS"}
 
 
 def ReferenceUnitSymbol(unitName):
     """The symbol of the unit *unitName* (CrsUnitNames) in a column header:
-    m, deg, ft, or ftUS, any other name unchanged, and m without a name."""
+    m, cm, deg, ft, or ftUS, any other name unchanged (grad for the grad of
+    EPSG:4807), and m without a name."""
     if not unitName:
         return "m"
     return _REFERENCE_UNIT_SYMBOLS.get(unitName, unitName)
@@ -347,43 +362,57 @@ def ReferenceUnitSymbol(unitName):
 def ReferenceCoordinateUnits(coordinateSystem):
     """The symbols of the units of the X, Y, and Z reference and estimated
     coordinates in the CRS of the reference data *coordinateSystem*
-    (CameraReferenceCrs): deg for the longitude and latitude of a geographic
-    CRS, otherwise the unit of the CRS, and for Z the unit of the vertical
-    component of a compound CRS, m for a geographic CRS without one, and
-    otherwise the unit of the CRS.  In a check in Metashape 2.3.2 the export
-    wrote X, Y, and Z in US survey feet for the CRS EPSG:2263."""
+    (CameraReferenceCrs): for the longitude and latitude of a geographic
+    CRS its angular unit, deg for degrees and grad for the grads of
+    EPSG:4807, otherwise the unit of the CRS, and for Z the unit of the
+    vertical component of a compound CRS, m for a geographic CRS without
+    one, and otherwise the unit of the CRS.  In checks in Metashape 2.3.2
+    the export wrote X, Y, and Z in US survey feet for the CRS EPSG:2263,
+    and longitude and latitude in grads for EPSG:4807."""
     horizontalUnit, verticalUnit = CrsUnitNames(coordinateSystem)
     if CrsKind(coordinateSystem) == "geographic":
-        return "deg", "deg", ReferenceUnitSymbol(verticalUnit or "metre")
+        angularSymbol = ReferenceUnitSymbol(horizontalUnit or "degree")
+        return angularSymbol, angularSymbol, ReferenceUnitSymbol(verticalUnit or "metre")
     horizontalSymbol = ReferenceUnitSymbol(horizontalUnit)
     return horizontalSymbol, horizontalSymbol, ReferenceUnitSymbol(verticalUnit or horizontalUnit)
 
 
-def ReferenceAccuracyUnitSymbols(coordinateSystem, exportedUnits=None):
-    """The symbols of the units of the 'Accuracy' values of X, Y, and Z in
-    the CRS of the reference data *coordinateSystem* (CameraReferenceCrs).
-    Metashape's reference export names them in its header (*exportedUnits*,
-    ExportedAccuracyUnits): in a check in Metashape 2.3.2 it wrote metres,
-    with (m), for a geographic CRS and for a projected CRS in metres, and
-    for EPSG:2263 US survey feet, with (ft).  A unit other than m is taken
-    as the unit of the coordinates of its axis (ReferenceCoordinateUnits),
-    which tells the US survey foot from the foot, unless these are in
-    metres or degrees.  Without a unit of the export, the unit is m for X
-    and Y in a geographic CRS and otherwise that of the coordinates."""
-    coordinateUnits = ReferenceCoordinateUnits(coordinateSystem)
-    if CrsKind(coordinateSystem) == "geographic":
-        expectedUnits = ("m", "m", coordinateUnits[2])
-    else:
-        expectedUnits = coordinateUnits
+def ChunkAccuracyUnitSymbol(chunkCrs):
+    """The symbol of the unit in which Metashape's reference export writes
+    the 'Accuracy' values of X, Y, and Z of the images of a chunk with the
+    CRS *chunkCrs*: the linear unit of a projected or a local CRS, and m
+    for a geographic, a geocentric, and a compound CRS.  In checks in
+    Metashape 2.3.2 the export wrote these values in the unit of the chunk
+    CRS, also when the images had a CRS of their own: US survey feet for a
+    chunk in EPSG:2263 with images in metres or in degrees, metres for a
+    chunk in metres with images in US survey feet, cm for a local CRS in
+    centimetres, and metres for a geographic and a geocentric CRS.  For a
+    compound CRS it wrote metres for all three axes, with a horizontal
+    component in US survey feet, in metres, or in degrees and heights in
+    metres or in US survey feet."""
+    wellKnownText = str(getattr(chunkCrs, "wkt", "") or "").lstrip().upper()
+    if CrsKind(chunkCrs) in ("projected", "local") and not wellKnownText.startswith("COMPD_CS"):
+        return ReferenceUnitSymbol(CrsUnitNames(chunkCrs)[0])
+    return "m"
+
+
+def ReferenceAccuracyUnitSymbols(chunkCrs, exportedUnits=None):
+    """The symbols of the units of the 'Accuracy' values of X, Y, and Z for
+    a chunk with the CRS *chunkCrs*.  The units in the header of
+    Metashape's reference export (*exportedUnits*, ExportedAccuracyUnits)
+    decide, but the export names the US survey foot ft, as the foot, so ft
+    becomes the foot of the chunk CRS (ChunkAccuracyUnitSymbol), ftUS for
+    the US survey foot, or for a compound CRS the foot of its horizontal
+    or its vertical component.  Without a unit of the export, each is the
+    unit of ChunkAccuracyUnitSymbol, so that 'Choose fields' shows the
+    headers of the CSV file."""
+    chunkUnit = ChunkAccuracyUnitSymbol(chunkCrs)
+    footSymbols = [chunkUnit] + [ReferenceUnitSymbol(unitName) for unitName in CrsUnitNames(chunkCrs)]
+    footSymbol = next((symbol for symbol in footSymbols if symbol in ("ft", "ftUS")), "ft")
     symbols = []
-    for axisIndex, expectedUnit in enumerate(expectedUnits):
+    for axisIndex in range(3):
         exportedUnit = exportedUnits[axisIndex] if exportedUnits else ""
-        if not exportedUnit:
-            symbols.append(expectedUnit)
-        elif exportedUnit == "m" or expectedUnit in ("m", "deg"):
-            symbols.append(exportedUnit)
-        else:
-            symbols.append(expectedUnit)
+        symbols.append(footSymbol if exportedUnit == "ft" else exportedUnit or chunkUnit)
     return tuple(symbols)
 
 
@@ -425,27 +454,32 @@ def _ReplaceRotationAngleName(replacementByName, match):
 
 
 def ReferenceColumnHeader(fieldIndex, coordinateSystem, rotationAngleNames=_YAW_PITCH_ROLL,
-                          exportedAccuracyUnits=None):
-    """CSV header of the Reference panel field *fieldIndex* of
+                          exportedAccuracyUnits=None, chunkCrs=None):
+    """CSV header of the Reference panel data field *fieldIndex* of
     ALL_REFERENCE_FIELDS for the CRS of the reference data
     *coordinateSystem* (CameraReferenceCrs), which can differ from the CRS
-    of the chunk.  The reference and estimated coordinates carry the units
-    of ReferenceCoordinateUnits, with longitude and latitude in degrees in
-    a geographic CRS (see CrsKind), and the 'Accuracy' values of X, Y, and
-    Z those of ReferenceAccuracyUnitSymbols for the units of the export
-    *exportedAccuracyUnits*: one unit when the three are equal, otherwise
-    the three separated by slashes.  The errors stay in metres, as the
-    export writes them also for a CRS in feet (Metashape 2.3.2).  The
-    rotation angles carry the names in *rotationAngleNames*."""
+    of the chunk *chunkCrs* (the same CRS when None).  The reference and
+    estimated coordinates carry the units of ReferenceCoordinateUnits, with
+    longitude and latitude in a geographic CRS and the geocentric X, Y,
+    and Z of a geocentric CRS under their own names (see CrsKind).  The
+    'Accuracy' values of X, Y, and Z carry the units of
+    ReferenceAccuracyUnitSymbols for the chunk CRS and the units of the
+    export *exportedAccuracyUnits*: one unit when the three are equal,
+    otherwise the three separated by slashes.  The errors stay in metres,
+    as the export writes them also for a CRS in feet (Metashape 2.3.2).
+    The rotation angles carry the names in *rotationAngleNames*."""
     columnHeader, fieldKey, computeFunctionName = ALL_REFERENCE_FIELDS[fieldIndex]
+    crsKind = CrsKind(coordinateSystem)
     if fieldKey in _REFERENCE_COORDINATE_HEADERS:
-        if CrsKind(coordinateSystem) == "geographic" and fieldKey in _GEOGRAPHIC_REFERENCE_HEADERS:
-            columnHeader = _GEOGRAPHIC_REFERENCE_HEADERS[fieldKey]
-        else:
-            headerTemplate, axisIndex = _REFERENCE_COORDINATE_HEADERS[fieldKey]
-            columnHeader = headerTemplate.format(ReferenceCoordinateUnits(coordinateSystem)[axisIndex])
+        headerTemplate, axisIndex = _REFERENCE_COORDINATE_HEADERS[fieldKey]
+        if crsKind == "geographic" and fieldKey in _GEOGRAPHIC_REFERENCE_HEADERS:
+            headerTemplate = _GEOGRAPHIC_REFERENCE_HEADERS[fieldKey]
+        elif crsKind == "geocentric" and fieldKey in _GEOCENTRIC_REFERENCE_HEADERS:
+            headerTemplate = _GEOCENTRIC_REFERENCE_HEADERS[fieldKey]
+        columnHeader = headerTemplate.format(ReferenceCoordinateUnits(coordinateSystem)[axisIndex])
     elif computeFunctionName == "_ComputeCombinedAccuracyXyz":
-        accuracyUnits = ReferenceAccuracyUnitSymbols(coordinateSystem, exportedAccuracyUnits)
+        accuracyUnits = ReferenceAccuracyUnitSymbols(coordinateSystem if chunkCrs is None else chunkCrs,
+                                                     exportedAccuracyUnits)
         unitText = accuracyUnits[0] if len(set(accuracyUnits)) == 1 else "/".join(accuracyUnits)
         columnHeader = "Accuracy_X/Y/Z_({})".format(unitText)
     return ApplyRotationAngleNames(columnHeader, rotationAngleNames)
@@ -810,7 +844,8 @@ def ExportImageParametersCsv(
     if selectedReferenceIndices:
         for index in selectedReferenceIndices:
             headerColumns.append(ReferenceColumnHeader(index, CameraReferenceCrs(chunk), RotationAngleNames(chunk),
-                                                       ExportedAccuracyUnits(referenceDataMap)))
+                                                       ExportedAccuracyUnits(referenceDataMap),
+                                                       getattr(chunk, "crs", None)))
     if includeGsd:
         for statisticLabel in ["Minimum", "2nd Percentile", "Mean", "Median", "98th Percentile", "Maximum"]:
             headerColumns.append("GSD {} {} (m)".format(statisticLabel, gsdTag))
@@ -1050,7 +1085,7 @@ class ReferenceSelectorDialog(QtWidgets.QDialog):
 
 _IMAGE_PARAMETER_EXPORTER_ABOUT_HTML = """
 <h2>Image Parameter Exporter</h2>
-<p>Version 1.0.0 (2026-11-18)</p>
+<p>Version 1.0.1 (2026-11-22)</p>
 <p><b>Author:</b> Geert J. Verhoeven (ORCID: <a href="https://orcid.org/0000-0003-4825-9604">0000-0003-4825-9604</a>)<br>
 <b>Contact:</b> <a href="mailto:geert.verhoeven@univie.ac.at">geert.verhoeven@univie.ac.at</a><br>
 <b>Licence:</b> GNU General Public License, version 3 or any later version (GPL-3.0-or-later),
@@ -1100,29 +1135,32 @@ image, in pixels, computed with <code>camera.error()</code>.  A
 residual that is not a finite number is left out and counted in the
 Console, so that the RMS, the maximum, and the count describe the
 same residuals.</li>
-<li><b>Reference panel data:</b> click &lsquo;Choose fields&rsquo; to select which Reference panel
-columns to export. These are reference coordinates, the values of the &lsquo;Accuracy&rsquo; columns
-(read as a priori standard deviations), estimated positions, errors, standard deviations, and
-rotation angles. They are shown in Metashape&rsquo;s Reference panel and extracted with <code>chunk.exportReference()</code>.
-The rotation columns follow the rotation angle convention of the chunk (for example yaw, pitch, and
-roll, or omega, phi, and kappa). The reference coordinates and the estimated positions are in the
-coordinate reference system (CRS) of the reference data of the images, which can differ from the
-CRS of the chunk. The column Coordinate_System gives the name of that CRS. The column headers give
-the units of the coordinates: degrees for the longitude and latitude of a geographic CRS, and
-otherwise the unit of the CRS, for example ftUS for the US survey foot. The headers of the
-&lsquo;Accuracy&rsquo; values give the units in which Metashape&rsquo;s export writes them, metres in
-a geographic CRS. The errors are in metres, also in a CRS in feet. The column Error_(m), the root
-sum of squares of the X, Y, and Z errors,
-has six decimals. It gets more where these give fewer than four significant digits, but no more than
+<li><b>Reference panel data:</b> click &lsquo;Choose fields&rsquo; to select which columns of the
+Reference pane to export. These are reference coordinates, the values of the &lsquo;Accuracy&rsquo;
+columns (read as a priori standard deviations), estimated positions, errors, standard deviations, and
+rotation angles. They are shown in Metashape&rsquo;s Reference pane and extracted with
+<code>chunk.exportReference()</code>. The rotation columns follow the rotation angle convention of
+the chunk (for example yaw, pitch, and roll, or omega, phi, and kappa). Metashape can hold the
+reference coordinates of the images in a coordinate reference system (CRS) other than that of the
+chunk. The reference coordinates and the estimated positions are in that CRS. The column
+Coordinate_System gives its name. The column headers give the units of the coordinates, the unit of
+the CRS, for example ftUS for the US survey foot. For the longitude and latitude of a geographic CRS,
+this is its angular unit (deg for degrees, grad for grads). In a geocentric CRS, the
+columns of the reference coordinates are X_(m), Y_(m), and Z_(m). Metashape&rsquo;s export writes
+the &lsquo;Accuracy&rsquo; values in the unit of the CRS of the chunk, also when the images have a
+CRS of their own, and in metres when that CRS is geographic, geocentric, or compound. Their header
+gives this unit. The errors of the positions are in metres, also in a CRS in feet, and those of the rotation
+angles in degrees. The column Error_(m), the root sum of squares of the X, Y, and Z errors, has six
+decimals. It gets more where these give fewer than four significant digits, but no more than
 the errors have as Metashape writes them. The field names in &lsquo;Choose fields&rsquo; are the
 column headers of the CSV. In a check in Metashape 2.3.2, Metashape&rsquo;s export named the row of
 an image labelled plane_00 by the file name of its photo, plane_00.png. The tool therefore finds the
 row by the file name of the photo, and otherwise by the label, with or without a file extension.
-Images whose photos share a file name get empty Reference panel cells, because their rows cannot be
+Images whose photos share a file name get empty cells in these columns, because their rows cannot be
 told apart (the Console names those file names). When the Reference panel data cannot be exported,
 the export stops with a message: untick the option to export the other columns.</li>
 </ul>
-<p>The option <i>Delimiter and decimal separator</i> chooses a comma with
+<p>The option ‘Delimiter and decimal separator’ chooses a comma with
 a decimal point (1.25), a semicolon with a decimal comma (1,25), or a tab
 with a decimal point.  The semicolon with the decimal comma suits Excel
 with regional settings that use the decimal comma, for example German
@@ -1536,7 +1574,8 @@ class ImageParameterExporterDialog(QtWidgets.QDialog):
     def _OnChooseReferenceFields(self):
         activeChunk = Metashape.app.document.chunk
         columnHeaders = [ReferenceColumnHeader(fieldIndex, CameraReferenceCrs(activeChunk),
-                                               RotationAngleNames(activeChunk))
+                                               RotationAngleNames(activeChunk),
+                                               chunkCrs=getattr(activeChunk, "crs", None))
                          for fieldIndex in range(len(ALL_REFERENCE_FIELDS))]
         dialog = ReferenceSelectorDialog(self._referenceFieldIndices, self, columnHeaders=columnHeaders)
         if dialog.exec_() == QtWidgets.QDialog.Accepted:
@@ -1579,7 +1618,15 @@ class ImageParameterExporterDialog(QtWidgets.QDialog):
         outputFilePath = Metashape.app.getSaveFileName("Save CSV",
             dir=os.path.join(defaultDirectory, defaultFilename), filter="CSV (*.csv)")
         if not outputFilePath: return
+        chosenFilePath = outputFilePath
         if not outputFilePath.lower().endswith(".csv"): outputFilePath += ".csv"
+        # A file at the path with the added extension, which the save dialog
+        # did not ask about, is replaced only after a question.
+        if ReplacesUnconfirmedFile(chosenFilePath, outputFilePath) and QtWidgets.QMessageBox.question(
+                self, "Image Parameter Exporter", ReplaceUnconfirmedFileQuestionText(outputFilePath),
+                QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+                QtWidgets.QMessageBox.No) != QtWidgets.QMessageBox.Yes:
+            print("Image Parameter Exporter: " + DeclinedReplacingText(outputFilePath)); return
         masterCameraCount = sum(1 for camera in activeChunk.cameras if IsMasterImage(camera))
         progressDialog = QtWidgets.QProgressDialog("Exporting...", "Cancel", 0, masterCameraCount, self)
         progressDialog.setWindowTitle("Image Parameter Exporter"); progressDialog.setWindowModality(QtCore.Qt.WindowModal)

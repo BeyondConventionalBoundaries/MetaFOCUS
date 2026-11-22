@@ -12,11 +12,16 @@ only for the current session.
 
 If already installed in the scripts directory, it loads silently.
 
+It adds MetaFOCUS > Check for Updates (MetaFOCUSCore/updateCheck.py),
+which installs a new release with the same installer
+(_InstallToolboxIntoDirectory), and starts the automatic check when the
+user allows it.
+
 Author:      Geert J. Verhoeven (ORCID: 0000-0003-4825-9604)
 Contact:     geert.verhoeven@univie.ac.at
 Licence:     GPL-3.0-or-later WITH GPL-3.0-linking-exception
 Requires:    Agisoft Metashape Professional 2.x+
-Developed for: Agisoft Metashape Professional 2.3.2 (tested offline, see README.md)
+Developed for: Agisoft Metashape Professional 2.3.2
 """
 
 import Metashape
@@ -83,7 +88,7 @@ _REQUIRED_CORE_MODULES = (
     "imageParameterExporter.py", "imageSubsetSelector.py", "interiorOrientationReport.py",
     "interiorOrientationViewer.py", "markerResidualInspector.py", "photogrammetryUtilities.py",
     "regionTools.py", "scaleBarAPrioriUncertainty.py", "sfmLogParser.py", "terminology.py",
-    "tiePointCovarianceExporter.py", "unpinnedMarkerProjectionRemover.py")
+    "tiePointCovarianceExporter.py", "unpinnedMarkerProjectionRemover.py", "updateCheck.py")
 
 
 def _InstallToolboxIntoDirectory(loaderPath, coreSourceFolder,
@@ -99,10 +104,16 @@ def _InstallToolboxIntoDirectory(loaderPath, coreSourceFolder,
     file is missing, the previous installation is restored, so a failed
     update never leaves a new loader with a missing or partial package.
     The folder of the installation is removed at the end, and no other
-    file or folder of *targetDirectory* is touched.  When the previous
-    installation cannot be restored, the folder is kept and the error
-    text names it.  Return (True, targetDirectory) on success or (False,
-    error text)."""
+    file or folder of *targetDirectory* is touched.  A file, or anything
+    else that is not a folder, with the name of the package folder is
+    refused before anything moves, because the installation would move it
+    aside and remove it.  The error text says whether the installation was
+    left as it was or the previous installation was restored.  When the
+    previous installation cannot be restored, the folder is kept, and the
+    error text names the folder that holds the previous package and where
+    it goes back before Metashape is started again
+    (_RestoreFailureText).  Return (True, targetDirectory) on success or
+    (False, error text)."""
     coreFolderName = os.path.basename(os.path.normpath(coreSourceFolder))
     destinationCoreFolder = os.path.join(targetDirectory, coreFolderName)
     destinationLoaderPath = os.path.join(targetDirectory, os.path.basename(loaderPath))
@@ -112,6 +123,9 @@ def _InstallToolboxIntoDirectory(loaderPath, coreSourceFolder,
     newCorePlaced = False
     try:
         os.makedirs(targetDirectory, exist_ok=True)
+        if os.path.lexists(destinationCoreFolder) and not os.path.isdir(destinationCoreFolder):
+            raise RuntimeError("{} is not a folder, so the installation was left as it was.".format(
+                destinationCoreFolder))
         installationFolder = tempfile.mkdtemp(prefix="MetaFOCUS_installation_", dir=targetDirectory)
         stagingCoreFolder = os.path.join(installationFolder, coreFolderName)
         previousCoreFolder = os.path.join(installationFolder, coreFolderName + "_previous")
@@ -137,13 +151,36 @@ def _InstallToolboxIntoDirectory(loaderPath, coreSourceFolder,
             if previousCoreSetAside:
                 os.rename(previousCoreFolder, destinationCoreFolder)
         except Exception as restoreError:
-            problems.append("Restoring the previous installation also failed: {}. The previous package is "
-                            "kept in {}.".format(restoreError, installationFolder))
+            problems.append(_RestoreFailureText(restoreError, previousCoreFolder if previousCoreSetAside else None,
+                                                destinationCoreFolder, installationFolder))
             return False, "\n".join(problems)
         _RemoveInstallationFolder(installationFolder)
+        if newCorePlaced or previousCoreSetAside:
+            problems.append("The previous installation was restored.")
+        elif "left as it was" not in problems[0]:
+            problems.append("The installation was left as it was.")
         return False, "\n".join(problems)
     _RemoveInstallationFolder(installationFolder)
     return True, targetDirectory
+
+
+def _RestoreFailureText(restoreError, previousCoreFolder, destinationCoreFolder, installationFolder):
+    """The end of the error text of an installation whose previous
+    installation could not be restored (_InstallToolboxIntoDirectory): the
+    error *restoreError*, the folder *previousCoreFolder* that holds the
+    previous package (None when there was none), and what has to happen
+    with it at *destinationCoreFolder* before Metashape is started
+    again."""
+    text = "Restoring the previous installation also failed: {}.".format(restoreError)
+    if previousCoreFolder is None:
+        return text + " The new package is left in {}, and the folder {} is kept.".format(
+            destinationCoreFolder, installationFolder)
+    if os.path.lexists(destinationCoreFolder):
+        return text + (" The previous package is kept in {}, and {} holds the new one. Replace the new package by "
+                       "the previous one before Metashape is started again.".format(previousCoreFolder,
+                                                                                    destinationCoreFolder))
+    return text + " The previous package is kept in {}. Move it back to {} before Metashape is started again.".format(
+        previousCoreFolder, destinationCoreFolder)
 
 
 def _RemoveInstallationFolder(installationFolder):
@@ -248,6 +285,19 @@ def _ShowChangelog():
     textBrowser.setOpenExternalLinks(True)
     textBrowser.setHtml(
         "<h2>MetaFOCUS Changelog</h2>"
+        "<h3>v1.1.0 (2026-11-22)</h3>"
+        "<ul>"
+        "<li><b>New (Interior Orientation Viewer):</b> Export HTML writes a report of every interior orientation "
+        "group, one file per group.</li>"
+        "<li><b>New:</b> MetaFOCUS &gt; Check for Updates shows the changes of a new version and installs it. "
+        "When allowed, MetaFOCUS checks at most once a day.</li>"
+        "<li><b>Fixed:</b> the GSD Value Exporter keeps control points labelled like inspection markers, and the "
+        "Console line that undoes Region Tools restores rotation, translation, and scale.</li>"
+        "<li><b>Fixed:</b> units and axes of the Reference panel data, covariance exports beside folders, the SfM "
+        "Log Parser on complete, combined, incomplete, and long logs, and p-values below 1e-300.</li>"
+        "<li><b>Changed:</b> clearer texts in several tools, a shorter README, CITATION.cff, and the module "
+        "headers.</li>"
+        "</ul>"
         "<h3>v1.0.0 (2026-11-18)</h3>"
         "<ul>"
         "<li><b>Fixed:</b> the Image Parameter Exporter names the CRS and units of the reference data of the "
@@ -946,6 +996,7 @@ def _ShowToolboxAbout(returnHtmlOnly=False):
         "<p><i>Photogrammetry Utilities (shared functions, "
         "not a menu item)</i></p>"
         "<p><b>Manual and Terminology</b></p>"
+        "<p><b>Check for Updates</b></p>"
         "<h3>Installation</h3>"
         "<p>When <code>MetaFOCUS.py</code> is first run (Tools &rarr; Run Script), "
         "MetaFOCUS offers to install itself. Choosing <b>Install permanently</b> "
@@ -961,17 +1012,57 @@ def _ShowToolboxAbout(returnHtmlOnly=False):
         "Support/Agisoft/Metashape Pro/scripts</code>, Linux: <code>~/.local/share/Agisoft/Metashape "
         "Pro/scripts</code>.)"
         "</p>"
+        "<h3>Updates</h3>"
+        "<p><b>Check for Updates</b> in the MetaFOCUS menu asks GitHub for the latest MetaFOCUS release. When it "
+        "is newer, MetaFOCUS downloads it, verifies its checksum, and lists its changes. <b>Install</b> puts it "
+        "into the Metashape scripts folder, and Metashape must then be restarted. Nothing is installed without "
+        "clicking Install. When allowed, MetaFOCUS also checks for updates when it starts (at most once a day). "
+        "The window of Check for Updates changes this choice.</p>"
     ).format(_METAFOCUS_VERSION, _METAFOCUS_DATE)
     if returnHtmlOnly:
         return aboutText
 
+    # A window that scrolls and fits the screen, because the text is
+    # longer than a message box can show on a small screen.
     from PySide2 import QtWidgets, QtCore
-    messageBox = QtWidgets.QMessageBox(
-        QtWidgets.QApplication.activeWindow())
-    messageBox.setWindowTitle("About: MetaFOCUS")
-    messageBox.setTextFormat(QtCore.Qt.RichText)
-    messageBox.setText(aboutText)
-    messageBox.exec_()
+    aboutDialog = QtWidgets.QDialog(QtWidgets.QApplication.activeWindow())
+    aboutDialog.setWindowTitle("About: MetaFOCUS")
+    aboutDialog.setWindowFlags(aboutDialog.windowFlags() & ~QtCore.Qt.WindowContextHelpButtonHint)
+    layout = QtWidgets.QVBoxLayout(aboutDialog)
+    textBrowser = QtWidgets.QTextBrowser()
+    textBrowser.setOpenExternalLinks(True)
+    textBrowser.setHtml(aboutText)
+    layout.addWidget(textBrowser)
+    closeButton = QtWidgets.QPushButton("Close")
+    closeButton.clicked.connect(aboutDialog.accept)
+    layout.addWidget(closeButton)
+    aboutDialog.resize(*_DialogSizeOnScreen(_ABOUT_DIALOG_WIDTH, _ABOUT_DIALOG_HEIGHT))
+    aboutDialog.exec_()
+
+
+# The size of the About window of the toolbox on a large screen, in
+# screen pixels.
+_ABOUT_DIALOG_WIDTH = 640
+_ABOUT_DIALOG_HEIGHT = 720
+
+# The space that a window of the loader leaves free around it on a small
+# screen, in screen pixels.
+_SCREEN_MARGIN = 80
+
+
+def _DialogSizeOnScreen(defaultWidth, defaultHeight):
+    """(width, height) of a window of the loader: its default size,
+    reduced to fit the available area of the primary screen with
+    _SCREEN_MARGIN to spare.  The default size when the screen cannot be
+    read (reported once in the Console)."""
+    from PySide2 import QtGui
+    try:
+        availableGeometry = QtGui.QGuiApplication.primaryScreen().availableGeometry()
+        return (max(1, min(defaultWidth, availableGeometry.width() - _SCREEN_MARGIN)),
+                max(1, min(defaultHeight, availableGeometry.height() - _SCREEN_MARGIN)))
+    except Exception as suppressedError:
+        _ReportSuppressedError("MetaFOCUS._DialogSizeOnScreen", suppressedError)
+        return defaultWidth, defaultHeight
 
 
 def _ShowManualAndTerminology():
@@ -1064,6 +1155,9 @@ def _LoadMetaFOCUS():
     from MetaFOCUSCore import aboutPages
     importlib.reload(aboutPages)
 
+    from MetaFOCUSCore import updateCheck
+    importlib.reload(updateCheck)
+
     # --- Register menu items in named submenu groups ---
     # Each module's _MENU_LABEL carries its submenu path, so the
     # four groups appear as labelled submenus under "MetaFOCUS".
@@ -1111,6 +1205,14 @@ def _LoadMetaFOCUS():
         _ReportSuppressedError("MetaFOCUS._LoadMetaFOCUS.changelogMenuItem", suppressedError)
     Metashape.app.addMenuItem(changelogMenuLabel, _ShowChangelog)
 
+    # --- Check for Updates menu item ---
+    updatesMenuLabel = "MetaFOCUS/Check for Updates"
+    try:
+        Metashape.app.removeMenuItem(updatesMenuLabel)
+    except Exception as suppressedError:
+        _ReportSuppressedError("MetaFOCUS._LoadMetaFOCUS.updatesMenuItem", suppressedError)
+    Metashape.app.addMenuItem(updatesMenuLabel, updateCheck.CheckForUpdatesFromMenu)
+
     # --- About MetaFOCUS menu item ---
     aboutMenuLabel = "MetaFOCUS/About MetaFOCUS"
     try:
@@ -1150,11 +1252,19 @@ def _LoadMetaFOCUS():
     print("    Depth & Render Export")
     print("  [Shared]")
     print("    Photogrammetry Utilities (not a menu item)")
-    # Manual and Terminology, Changelog, and About MetaFOCUS are entries that
-    # the loader adds at the bottom of the menu, not tools, so the summary
-    # does not list them (Geert, 16 October 2026).
+    # Manual and Terminology, Changelog, Check for Updates, and About
+    # MetaFOCUS are entries that the loader adds at the bottom of the menu,
+    # not tools, so the summary does not list them (Geert, 16 October 2026).
     print("=" * 56)
     print("")
+
+    # The automatic check, or the question whether it is allowed, with the
+    # installer of this loader for Install.  A failure does not stop the
+    # load.
+    try:
+        updateCheck.StartAutomaticCheck(_InstallToolboxIntoDirectory, _SCRIPTS_DIRECTORY)
+    except Exception as suppressedError:
+        _ReportSuppressedError("MetaFOCUS._LoadMetaFOCUS.updateCheck", suppressedError)
 
 
 def _ReportLoadFailure(loadError):

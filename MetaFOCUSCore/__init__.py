@@ -42,9 +42,12 @@ Modules (grouped as in the MetaFOCUS menu):
     aboutPages                    : Manual and Terminology, every About section and the terminology
     terminology                   : the terminology with its sources (in Manual and Terminology)
 
+  Updates
+    updateCheck                   : Check for Updates, and the automatic check when it is allowed
+
 Author:   Geert J. Verhoeven (ORCID: 0000-0003-4825-9604)
 Licence:  GPL-3.0-or-later WITH GPL-3.0-linking-exception
 """
 
-_METAFOCUS_VERSION = "1.0.0"
-_METAFOCUS_DATE = "2026-11-18"
+_METAFOCUS_VERSION = "1.1.0"
+_METAFOCUS_DATE = "2026-11-22"

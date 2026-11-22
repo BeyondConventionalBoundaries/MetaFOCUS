@@ -13,16 +13,15 @@ Two utilities for working with the chunk region (bounding box):
    RecordRegionToolsTransform), so that the GSD tools report chunk
    units for an arbitrary scale while it is unchanged, and so that no
    tool takes its local coordinates for georeferenced ones (also with
-   a physical scale).  The setting of the
-   coordinate reference system (CRS) of the chunk (chunk.crs) is not
-   changed, but the new origin and axes change the datum, and so the CRS,
-   of the world coordinates, while their coordinate system stays.  Useful
-   when the
-   region has been rotated by hand to align with a structure and the
-   coordinate axes should follow it.  In a georeferenced chunk this
-   replaces the georeference, so the dialog asks for a second
-   confirmation.  The previous transform is printed to the Console
-   as a line that restores it.
+   a physical scale).  The setting of the coordinate reference system
+   (CRS) of the chunk (chunk.crs) is not changed, but world coordinates
+   are then measured from the new origin along the new axes, so their
+   values can change.  Useful when the region has been rotated by hand
+   to align with a structure and the coordinate axes should follow it.
+   In a georeferenced chunk this replaces the georeference, so the
+   dialog asks for a second confirmation.  The previous transform and
+   the records of Region Tools in the chunk metadata are printed to
+   the Console as a line that restores them (see ChunkTransformState).
 
 2. Copy Region to Other Chunks: copies the active chunk's region
    (position, rotation, and size) to selected target chunks,
@@ -60,12 +59,12 @@ the adapted parts and is kept here and in THIRD_PARTY_NOTICES.txt:
     SOFTWARE.
 
 Author:      Geert J. Verhoeven (ORCID: 0000-0003-4825-9604)
-Version:     1.0.0 (2026-11-18)
+Version:     1.0.1 (2026-11-22)
 Date:        2026-03-24
 Licence:     GPL-3.0-or-later WITH GPL-3.0-linking-exception
 Contact:     geert.verhoeven@univie.ac.at
 Requires:    Agisoft Metashape Professional 2.x+
-Developed for: Agisoft Metashape Professional 2.3.2 (tested offline, see README.md)
+Developed for: Agisoft Metashape Professional 2.3.2
 
 Usage:
     Loaded by the MetaFOCUS loader (MetaFOCUS.py).  Open the dialog
@@ -78,10 +77,9 @@ import os
 
 from PySide2 import QtWidgets, QtCore
 from .photogrammetryUtilities import (
-    CrsKind, DescribeException, DescribeMissingPhysicalScale, FormatTransformMatrixForConsole,
-    HasArbitraryRegionToolsScale, IsChunkScalePhysical, IsGeoreferencedChunk, RecordRegionToolsTransform,
-    ReportSuppressedError, EARTH_BOUND_CRS_KINDS, REGION_TOOLS_SCALE_METADATA_KEY,
-    REGION_TOOLS_TRANSFORM_METADATA_KEY)
+    CrsKind, DescribeException, DescribeMissingPhysicalScale, HasArbitraryRegionToolsScale, IsChunkScalePhysical,
+    IsGeoreferencedChunk, MetadataValue, RecordRegionToolsTransform, ReportSuppressedError, EARTH_BOUND_CRS_KINDS,
+    REGION_TOOLS_SCALE_METADATA_KEY, REGION_TOOLS_TRANSFORM_METADATA_KEY)
 
 
 _TOOL_NAME = "Region Tools"
@@ -91,14 +89,86 @@ _TOOL_NAME = "Region Tools"
 # Core logic
 # ===================================================================
 
-def TransformRestoreCommand(chunkKey, transformMatrix):
-    """One Console line that gives the chunk with key *chunkKey* the
-    transform *transformMatrix* again, whichever chunk is active when
-    the line is run.  It is meant to be printed without indentation,
-    because the Console rejects an indented line."""
-    return ("[candidateChunk for candidateChunk in Metashape.app.document.chunks "
-            "if candidateChunk.key == {!r}][0].transform.matrix = {}".format(
-                chunkKey, FormatTransformMatrixForConsole(transformMatrix)))
+def ChunkTransformState(chunk):
+    """What Align Coordinate Axes to Region replaces in *chunk*, as plain
+    numbers and texts, so that TransformRestoreCommand can restore it: the
+    rotation (three rows of three elements), the translation (three
+    elements), and the scale of chunk.transform, each None when the
+    transform has none, and the values of the two entries of Region Tools
+    in the chunk metadata (REGION_TOOLS_TRANSFORM_METADATA_KEY and
+    REGION_TOOLS_SCALE_METADATA_KEY), each None when absent.  The matrix
+    alone would not do: Metashape 2.3.2 gives a chunk without reference
+    data a transform without a rotation, a translation, and a scale, whose
+    matrix is the identity, and setting that matrix gives the chunk the
+    scale 1, which MetaFOCUS takes for a physical scale."""
+    transform = chunk.transform
+    rotation = transform.rotation
+    translation = transform.translation
+    scale = transform.scale
+    metadata = getattr(chunk, "meta", None)
+    return {
+        "rotation": None if rotation is None else [
+            [float(rotation[rowIndex, columnIndex]) for columnIndex in range(3)] for rowIndex in range(3)],
+        "translation": None if translation is None else [float(translation[index]) for index in range(3)],
+        "scale": None if scale is None else float(scale),
+        "transformRecord": MetadataValue(metadata, REGION_TOOLS_TRANSFORM_METADATA_KEY),
+        "scaleRecord": MetadataValue(metadata, REGION_TOOLS_SCALE_METADATA_KEY),
+    }
+
+
+def ConsoleRotationExpression(rotationRows):
+    """Python expression for the Console that recreates the rotation
+    *rotationRows* of ChunkTransformState exactly (every element written
+    with repr), or "None" for a transform without a rotation."""
+    if rotationRows is None:
+        return "None"
+    return "Metashape.Matrix([{}])".format(", ".join(
+        "[" + ", ".join(repr(element) for element in row) + "]" for row in rotationRows))
+
+
+def ConsoleTranslationExpression(translationElements):
+    """Python expression for the Console that recreates the translation
+    *translationElements* of ChunkTransformState exactly, or "None" for a
+    transform without a translation."""
+    if translationElements is None:
+        return "None"
+    return "Metashape.Vector([{}])".format(", ".join(repr(element) for element in translationElements))
+
+
+def TransformRestoreCommand(chunkKey, transformState):
+    """One Console line that gives the chunk with key *chunkKey* the state
+    *transformState* (ChunkTransformState) again, whichever chunk is
+    active when the line is run: the rotation, the translation, and the
+    scale of its transform, each also when it was absent, and the two
+    entries of Region Tools in its metadata (ConsoleMetadataStatements).
+    The statements are separated by semicolons, and the line is meant to
+    be printed without indentation, because the Console rejects an
+    indented line."""
+    statements = [
+        "restoredChunk = [candidateChunk for candidateChunk in Metashape.app.document.chunks "
+        "if candidateChunk.key == {!r}][0]".format(chunkKey),
+        "restoredChunk.transform.rotation = {}".format(ConsoleRotationExpression(transformState["rotation"])),
+        "restoredChunk.transform.translation = {}".format(
+            ConsoleTranslationExpression(transformState["translation"])),
+        "restoredChunk.transform.scale = {}".format(
+            "None" if transformState["scale"] is None else repr(transformState["scale"])),
+    ]
+    statements += ConsoleMetadataStatements(REGION_TOOLS_TRANSFORM_METADATA_KEY, transformState["transformRecord"])
+    statements += ConsoleMetadataStatements(REGION_TOOLS_SCALE_METADATA_KEY, transformState["scaleRecord"])
+    return "; ".join(statements)
+
+
+def ConsoleMetadataStatements(metadataKey, recordedValue):
+    """The statements of TransformRestoreCommand that give the entry
+    *metadataKey* of the chunk metadata its value *recordedValue* of
+    ChunkTransformState again: the value, also an empty text, or, for an
+    entry that was absent (None), its deletion.  The entry is set before
+    it is deleted, so that the deletion works also when the entry is
+    absent and the line can be run more than once (a check in Metashape
+    2.3.2 deleted an entry of the chunk metadata with del)."""
+    if recordedValue is None:
+        return ["restoredChunk.meta[{!r}] = ''".format(metadataKey), "del restoredChunk.meta[{!r}]".format(metadataKey)]
+    return ["restoredChunk.meta[{!r}] = {!r}".format(metadataKey, str(recordedValue))]
 
 
 def IsSameCoordinateSystem(firstCoordinateSystem, secondCoordinateSystem):
@@ -258,19 +328,19 @@ def AlignmentQuestionText(previousScaleKind):
     arbitrary units."""
     if previousScaleKind == PREVIOUS_SCALE_WITHOUT_TRANSFORM:
         return ("The chunk gets a transform: the coordinate axes follow the region and the origin moves to the "
-                "region centre. This changes the datum, and so the CRS, of the world coordinates, while the CRS "
-                "setting of the chunk stays as it is.\n\n"
+                "region centre. World coordinates are then measured from the new origin along the new axes, so "
+                "their values can change, while the CRS setting of the chunk stays as it is.\n\n"
                 "The chunk has no transform, so the new transform gets the arbitrary scale 1 and the chunk stays in "
                 "arbitrary units.")
     if previousScaleKind == PREVIOUS_SCALE_WITHOUT_PHYSICAL_SCALE:
         return ("The chunk transform is replaced: the coordinate axes follow the region and the origin moves to the "
-                "region centre. This changes the datum, and so the CRS, of the world coordinates, while the CRS "
-                "setting of the chunk stays as it is.\n\n"
+                "region centre. World coordinates are then measured from the new origin along the new axes, so "
+                "their values can change, while the CRS setting of the chunk stays as it is.\n\n"
                 "The chunk has no physical scale, so the new transform gets the arbitrary scale 1 and the chunk "
                 "stays in arbitrary units.")
     text = ("The chunk transform is replaced: the coordinate axes follow the region and the origin moves to the "
-            "region centre. Scale is preserved. This changes the datum, and so the CRS, of the world coordinates, "
-            "while the CRS setting of the chunk stays as it is.")
+            "region centre. Scale is preserved. World coordinates are then measured from the new origin along the "
+            "new axes, so their values can change, while the CRS setting of the chunk stays as it is.")
     if previousScaleKind == PREVIOUS_SCALE_REGION_TOOLS:
         text += ("\n\nThe chunk transform has the arbitrary scale that Align Coordinate Axes to Region gave it, so "
                  "the chunk stays in arbitrary units.")
@@ -298,8 +368,8 @@ def GeocentricFrameNote(crsName):
     geocentric CRS *crsName*: with a transform, Metashape reads the new
     local coordinates as geocentric coordinates."""
     return ("The CRS of the chunk, {}, is not a local one, so Metashape reads the new local coordinates as "
-            "geocentric coordinates near the centre of the Earth, and the values in the Reference pane and the "
-            "exports in that CRS are meaningless. Choose a local CRS, for example Local Coordinates (m), in the "
+            "geocentric coordinates near the centre of the Earth or of another celestial body, and the values "
+            "in the Reference pane and the exports in that CRS are meaningless. Choose a local CRS, for example Local Coordinates (m), in the "
             "Reference Settings to work in the new coordinates.".format(crsName))
 
 
@@ -311,11 +381,12 @@ def AlignCoordinateAxesToRegion(chunk):
     FlipRegionRotationColumnsZUp) and whose origin is the region
     centre.  The scale of the previous transform is preserved (scale 1
     when the chunk had no physical scale).  chunk.crs is not changed, but
-    the new origin and axes change the datum, and so the CRS, of the world
-    coordinates: in a georeferenced chunk the new world coordinates are
-    read as
-    geocentric, so the georeference is lost until the next Update or
-    Optimize Cameras with reference data.
+    world coordinates are then measured from the new origin along the new
+    axes, so their values can change.  In a georeferenced chunk they are
+    read as geocentric, so the georeference is lost until the next Update
+    or Optimize Cameras with enough enabled reference coordinates, or
+    until the line that the dialog prints (TransformRestoreCommand)
+    restores the previous transform.
 
     A chunk without a physical scale gets the arbitrary scale 1, and a
     chunk whose transform is still the one that Region Tools recorded
@@ -513,7 +584,7 @@ def CopyRegionToSelectedChunks(sourceChunk, targetChunks):
 
 _ABOUT_HTML = """
 <h2>Region Tools</h2>
-<p><b>Version:</b> 1.0.0 (2026-11-18)<br>
+<p><b>Version:</b> 1.0.1 (2026-11-22)<br>
 <b>Author:</b> Geert J. Verhoeven
 (ORCID: <a href="https://orcid.org/0000-0003-4825-9604">
 0000-0003-4825-9604</a>)<br>
@@ -535,9 +606,8 @@ the header of regionTools.py.</p>
 orientation and the origin lies at the region centre. The scale of the chunk transform is preserved.
 The setting of the coordinate reference system (CRS) of the chunk in the Reference Settings is not
 changed. The transform between the internal chunk coordinates and the world coordinates is replaced,
-however, and with it the datum of the world coordinates, whose origin and axis orientation change.
-Their coordinate system stays the same, but with the new datum their CRS changes. The <i>Active
-chunk</i> box shows the CRS of the chunk, so that a georeference is visible before it is replaced.</p>
+however, so world coordinates are then measured from the new origin along the new axes, and their
+values can change. The <i>Active chunk</i> box shows the CRS that is set for the chunk.</p>
 <p>The new Z axis is the region axis that points towards positive internal chunk z: when the region&rsquo;s
 z axis points the other way, its x and z axes are both reversed, which keeps the axes right-handed.
 Internal chunk z is not necessarily up in the CRS of the chunk (for example in a chunk referenced
@@ -555,19 +625,22 @@ axes.</p>
 geographic, projected, or geocentric CRS, the transform maps internal coordinates to geocentric
 coordinates. Aligning the axes replaces it with a transform to local coordinates centred on the
 region, while the chunk keeps its CRS. As a result, Metashape reads these local coordinates as
-geocentric coordinates near the centre of the Earth. The values in the Reference pane, exports in
-that CRS, and the MetaFOCUS tools that use the georeference then give meaningless values. In
-addition, an existing raster digital elevation model (DEM) or orthomosaic no longer matches the
+geocentric coordinates near the centre of the Earth or of another celestial body. The values in the
+Reference pane, exports in that CRS, and the MetaFOCUS tools that use the georeference then give
+meaningless values. In addition, an existing raster digital elevation model (DEM) or orthomosaic no longer matches the
 oriented images and the 3D tie points. The tool therefore asks for a second confirmation that names
-the CRS and these consequences. The next <i>Update</i> in the Reference pane, or <i>Optimize Cameras</i>
-with reference data, fits the transform to the reference data again, which need not reproduce the
-previous transform exactly. The line that the tool prints to the Console (below), however, restores
-the previous transform itself.</p>
-<p><b>Restoring the previous transform:</b> before it replaces the
-transform, the tool
-prints the previous chunk transform to the Console as a single line
-that can be pasted into the Console as it is.  The line addresses the
-chunk by its key, so it restores the right chunk whichever chunk is
+the CRS and these consequences. With enough enabled reference coordinates, the next <i>Update</i> in
+the Reference pane, or <i>Optimize Cameras</i>, fits the transform to the reference data again, which
+need not reproduce the previous transform exactly. The line that the tool prints to the Console
+(below), however, restores the previous transform itself. Without enough enabled reference
+coordinates, for example after an imported chunk transform, this line restores the georeference
+without reference coordinates.</p>
+<p><b>Restoring the previous transform:</b> before it replaces the transform, the tool prints a
+single line to the Console that can be pasted into the Console as it is. The line restores the
+rotation, the translation, and the scale of the previous chunk transform, also when the transform had
+none of them, as in a chunk without a physical scale. It also restores the record of the tool in the
+chunk metadata (below), so that the MetaFOCUS tools treat the scale and the georeference of the chunk
+as before. The line addresses the chunk by its key, so it restores the right chunk whichever chunk is
 active.</p>
 <p><b>Chunks without a physical scale:</b> in a chunk without a physical scale, the transform has no
 scale from Metashape scale bars, reference coordinates, or an imported chunk transform. (Metashape
@@ -581,7 +654,8 @@ no ground sampling distance (GSD) and no image scale number. Applying the functi
 chunk keeps the arbitrary scale and records the new transform. Once the transform changes otherwise
 (Metashape scale bars, reference coordinates, or an imported chunk transform), the record no longer
 applies. When such a chunk names a geographic, projected, or geocentric CRS, Metashape reads the new
-local coordinates as geocentric coordinates near the centre of the Earth, and the Console says so.
+local coordinates as geocentric coordinates near the centre of the Earth or of another celestial
+body, and the Console says so.
 To work in the new coordinates, one should then choose a local CRS in the Reference Settings.</p>
 <p><b>Not georeferenced afterwards:</b> the tool records every new transform, including one with a
 physical scale. With this record, no MetaFOCUS tool takes the local coordinates for georeferenced
@@ -643,7 +717,8 @@ class RegionToolsDialog(QtWidgets.QDialog):
         chunkLabel = chunk.label if chunk else "(none)"
         activeChunkLayout.addRow("Chunk:", QtWidgets.QLabel(chunkLabel))
 
-        # Shown so that a georeference is visible before it is replaced.
+        # The CRS set for the chunk in the Reference Settings (chunk.crs),
+        # whether or not the chunk is georeferenced.
         crsName = "(not set)"
         if chunk and chunk.crs is not None:
             crsName = getattr(chunk.crs, "name", "") or "(unnamed)"
@@ -734,30 +809,33 @@ class RegionToolsDialog(QtWidgets.QDialog):
                 "MetaFOCUS tools that use the georeference then give "
                 "meaningless values, and an existing raster DEM or "
                 "orthomosaic no longer matches the oriented images and "
-                "the tie points. The next Update in the Reference pane, "
-                "or Optimize Cameras with reference data, restores the "
-                "georeference and with it the previous axes.\n\n"
-                "The previous transform is printed to the Console so "
-                "that it can be restored.\n\n"
+                "the tie points. With enough enabled reference "
+                "coordinates, the next Update in the Reference pane, or "
+                "Optimize Cameras, fits the transform to the reference "
+                "data again, which need not give the previous axes "
+                "exactly.\n\n"
+                "The previous transform is printed to the Console as a "
+                "line that restores it. Without enough enabled reference "
+                "coordinates, for example after an imported chunk "
+                "transform, this line restores the georeference without "
+                "reference coordinates.\n\n"
                 "Replace the chunk transform?".format(crsName),
                 QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
                 QtWidgets.QMessageBox.No)
             if reply != QtWidgets.QMessageBox.Yes:
                 return
 
-        previousTransformMatrix = chunk.transform.matrix
+        previousTransformState = ChunkTransformState(chunk)
 
         print("")
         print("=" * 60)
         print("Region Tools: Align Coordinate Axes to Region")
         print("=" * 60)
         print("Chunk: {}".format(chunk.label))
-        if previousTransformMatrix is None:
-            print("Previous chunk transform: none (the chunk had no transform).")
-        else:
-            print("Previous chunk transform. To restore it, paste this line "
-                  "into the Console:")
-            print(TransformRestoreCommand(chunk.key, previousTransformMatrix))
+        print("To restore the previous chunk transform and the records of "
+              "Region Tools in the chunk metadata, paste this line into "
+              "the Console:")
+        print(TransformRestoreCommand(chunk.key, previousTransformState))
 
         AlignCoordinateAxesToRegion(chunk)
 
@@ -770,8 +848,8 @@ class RegionToolsDialog(QtWidgets.QDialog):
             self, _TOOL_NAME,
             "The coordinate axes now follow the region. {}{}".format(
                 AlignmentResultScaleText(previousScaleKind),
-                "\n\nThe previous, georeferenced transform is printed in "
-                "the Console as a line that restores it." if isGeoreferenced else ""))
+                "\n\nThe Console shows a line that restores the previous, "
+                "georeferenced transform." if isGeoreferenced else ""))
 
     def _OnCopyRegion(self):
         chunk = Metashape.app.document.chunk

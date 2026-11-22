@@ -18,7 +18,7 @@ Contact:    geert.verhoeven@univie.ac.at
 Version:    1.0.0 (2026-11-18)
 Licence:    GPL-3.0-or-later WITH GPL-3.0-linking-exception
 Requires:   Agisoft Metashape Professional 2.x
-Developed for: Agisoft Metashape Professional 2.3.2 (tested offline, see README.md)
+Developed for: Agisoft Metashape Professional 2.3.2
 
 Background
 ----------
